@@ -13,6 +13,8 @@ test:
 	./build/test-ui
 	$(CC) $(CFLAGS) tests/test_journal.c $(COMMON) -lm -o build/test-journal
 	./build/test-journal
+	$(CC) $(CFLAGS) tests/test_cover.c $(COMMON) -lm -o build/test-cover
+	./build/test-cover
 	python3 tests/test_launcher.py
 kindle:
 	./scripts/build-kindle.sh

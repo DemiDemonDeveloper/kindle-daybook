@@ -63,6 +63,8 @@ Open **Journal** to write a dated entry. Its editor supports multiple lines. Jou
 
 Changes are kept in memory and saved to local storage before screen refreshes. Rendering does not reload the task file on every update.
 
+For a wallpaper or motivational quotes, see [Screen cover](COVER.md). The cover appears after five minutes idle, or use Menu → Lock screen now. Tap once to return; it keeps Telegram syncing.
+
 To leave, choose **Menu → Exit dashboard**. Wait for Kindle Home before connecting USB.
 
 ## 4. Connect Telegram

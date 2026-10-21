@@ -32,6 +32,31 @@ static int tab, page, screen, edit_id, kind, selected_id,
     dirty = 1, poll_seconds = 30, telegram_ready, shift, frame_count;
 static int visible[MAX_TASKS], visible_count;
 static int journal_mode, journal_page, journal_selected, journal_body_page;
+static int covered, wallpaper_mode, idle_seconds = 300;
+static unsigned cover_number;
+static time_t last_touch;
+static char cover_quotes[32][161];
+static int cover_quote_count;
+static const char *default_quotes[] = {
+    "One small step today is still progress.",
+    "Make room for what matters today.",
+    "Your next small action can start here.",
+    "Consistency grows one day at a time.", "Pause. Breathe. Begin again."};
+static time_t monotonic_seconds(void) {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return t.tv_sec;
+}
+static void cover_open(void) {
+  covered = 1;
+  cover_number++;
+  dirty = 1;
+}
+static void idle_tick(time_t now) {
+  if (!covered && screen != 1 && idle_seconds > 0 &&
+      now - last_touch >= idle_seconds)
+    cover_open();
+}
 static volatile sig_atomic_t running = 1;
 static pid_t network_pid;
 static int network_type, network_last_ok;
@@ -75,6 +100,38 @@ static char *read_file(const char *name, size_t limit) {
   fclose(f);
   return s;
 }
+static void cover_settings_load(void) {
+  char file[1024];
+  path(file, sizeof(file), "wallpaper.pgm");
+  wallpaper_mode = access(file, R_OK) == 0;
+  path(file, sizeof(file), "cover-mode.txt");
+  char *mode = read_file(file, 64);
+  if (mode) {
+    if (!strcmp(mode, "wallpaper\n"))
+      wallpaper_mode = 1;
+    if (!strcmp(mode, "quotes\n"))
+      wallpaper_mode = 0;
+    free(mode);
+  }
+}
+static int cover_mode_save(int mode) {
+  char file[1024], tmp[1024];
+  path(file, sizeof(file), "cover-mode.txt");
+  path(tmp, sizeof(tmp), "cover-mode.tmp");
+  FILE *f = fopen(tmp, "w");
+  if (!f)
+    return 0;
+  int ok = fputs(mode ? "wallpaper\n" : "quotes\n", f) >= 0;
+  if (fflush(f) || fsync(fileno(f)))
+    ok = 0;
+  if (fclose(f))
+    ok = 0;
+  if (ok && rename(tmp, file))
+    ok = 0;
+  if (!ok)
+    unlink(tmp);
+  return ok;
+}
 static void date_now(void) {
   time_t now = time(NULL);
   struct tm t;
@@ -102,6 +159,10 @@ static void config_load(void) {
   v = cJSON_GetObjectItemCaseSensitive(j, "timezone");
   if (cJSON_IsString(v) && strlen(v->valuestring) < sizeof(tz))
     snprintf(tz, sizeof(tz), "%s", v->valuestring);
+  v = cJSON_GetObjectItemCaseSensitive(j, "idle_seconds");
+  if (cJSON_IsNumber(v) &&
+      (v->valueint == 0 || (v->valueint >= 30 && v->valueint <= 86400)))
+    idle_seconds = v->valueint;
   cJSON_Delete(j);
   int tok_ok = *token != 0, id_ok = *chat_id != 0;
   for (char *c = token; *c; c++)
@@ -505,21 +566,72 @@ static void draw_detail(void) {
 }
 static void draw_menu(void) {
   header("SETTINGS");
-  text(24, 128, "Daybook 0.2.1 alpha", 2, 0);
+  text(24, 128, "Daybook 0.3.0 alpha", 2, 0);
   text(24, 170, "Dedicated task dashboard", 2, 0);
   text(24, 224,
        telegram_ready ? "Telegram configured" : "Telegram not configured", 2,
        0);
-  wrapped(24, 262,
-          "Create a bot with BotFather, then run the setup helper on your Mac.",
-          33, 4, 2);
-  text(24, 380, "Daily tasks reset at midnight.", 2, 0);
-  wrapped(24, 420,
-          "Exit before connecting USB. Power management resumes when you exit.",
-          33, 3, 2);
+  wrapped(24, 262, "Screen cover keeps Telegram syncing. Tap to return.", 33, 3,
+          2);
+  button(24, 350, 552, 64, "Lock screen now", 0);
+  button(24, 430, 552, 64,
+         wallpaper_mode ? "Cover: wallpaper (tap to switch)"
+                        : "Cover: quotes (tap to switch)",
+         0);
   button(24, 550, 552, 64, "Sync now", 0);
   button(24, 630, 552, 64, "Exit dashboard", 0);
   button(24, 710, 552, 64, "Back", 0);
+}
+static int draw_wallpaper(void) {
+  char file[1024];
+  path(file, sizeof(file), "wallpaper.pgm");
+  FILE *f = fopen(file, "rb");
+  if (!f)
+    return 0;
+  char magic[8], size[32], max[8];
+  int ok = fgets(magic, sizeof(magic), f) && fgets(size, sizeof(size), f) &&
+           fgets(max, sizeof(max), f) && !strcmp(magic, "P5\n") &&
+           !strcmp(size, "600 800\n") && !strcmp(max, "255\n") &&
+           fread(pixels, 1, sizeof(pixels), f) == sizeof(pixels) &&
+           fgetc(f) == EOF;
+  fclose(f);
+  if (!ok)
+    memset(pixels, 255, sizeof(pixels));
+  return ok;
+}
+static void draw_cover(void) {
+  if (!(wallpaper_mode && draw_wallpaper())) {
+    char file[1024];
+    path(file, sizeof(file), "quotes.txt");
+    FILE *f = fopen(file, "r");
+    cover_quote_count = 0;
+    if (f) {
+      char line[512];
+      while (cover_quote_count < 32 && fgets(line, sizeof(line), f)) {
+        size_t n = strcspn(line, "\r\n");
+        if (!strchr(line, '\n') && !feof(f)) {
+          int c;
+          while ((c = fgetc(f)) != EOF && c != '\n') {
+          }
+          continue;
+        }
+        if (n && n <= 160) {
+          line[n] = 0;
+          snprintf(cover_quotes[cover_quote_count++], 161, "%s", line);
+        }
+      }
+      fclose(f);
+    }
+    text(40, 90, "DAYBOOK", 3, 0);
+    text(40, 145, day, 2, 0);
+    rect(40, 215, 520, 2, 0);
+    const char *quote = cover_quote_count
+                            ? cover_quotes[cover_number % cover_quote_count]
+                            : default_quotes[cover_number % 5];
+    wrapped(40, 285, quote, 21, 9, 3);
+  }
+  rect(0, 720, W, 80, 255);
+  text(92, 748, "Tap to return to Daybook", 2, 0);
 }
 static int write_frame(const char *file) {
   FILE *f = fopen(file, "wb");
@@ -539,7 +651,9 @@ static void render(const char *snapshot) {
   }
 
   memset(pixels, 255, sizeof(pixels));
-  if (screen == 1)
+  if (covered)
+    draw_cover();
+  else if (screen == 1)
     draw_editor();
   else if (screen == 2 || screen == 4)
     draw_detail();
@@ -625,6 +739,12 @@ static void edit_open(int id) {
   dirty = 1;
 }
 static void touch(int x, int y) {
+  last_touch = monotonic_seconds();
+  if (covered) {
+    covered = 0;
+    dirty = 1;
+    return;
+  }
   char cmd[JOURNAL_MAX + 64];
   dirty = 1;
   status_text[0] = 0;
@@ -815,6 +935,18 @@ static void touch(int x, int y) {
     return;
   }
   if (screen == 3) {
+    if (y >= 350 && y < 414) {
+      cover_open();
+      return;
+    }
+    if (y >= 430 && y < 494) {
+      if (cover_mode_save(!wallpaper_mode))
+        wallpaper_mode = !wallpaper_mode;
+      else
+        snprintf(status_text, sizeof(status_text),
+                 "Could not save cover choice");
+      return;
+    }
     if (y >= 550 && y < 614) {
       next_poll = 0;
       snprintf(status_text, sizeof(status_text), "%s",
@@ -1123,6 +1255,7 @@ static int hardware_run(void) {
       dirty = 1;
     }
     network_tick();
+    idle_tick(monotonic_seconds());
     if (dirty && running)
       render(NULL);
   }
@@ -1138,6 +1271,7 @@ static int hardware_run(void) {
 int main(int argc, char **argv) {
   const char *snapshot = NULL, *command = NULL;
   int demo = 0, probe = 0, sync = 0;
+  last_touch = monotonic_seconds();
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--data") && i + 1 < argc)
       snprintf(data_dir, sizeof(data_dir), "%s", argv[++i]);
@@ -1158,6 +1292,8 @@ int main(int argc, char **argv) {
       screen = 5;
     else if (!strcmp(argv[i], "--demo"))
       demo = 1;
+    else if (!strcmp(argv[i], "--cover"))
+      covered = 1;
     else if (!strcmp(argv[i], "--sync-once"))
       sync = 1;
     else if (!strcmp(argv[i], "--probe"))
@@ -1174,6 +1310,7 @@ int main(int argc, char **argv) {
   mkdir(data_dir, 0700);
   path(state_path, sizeof(state_path), "state.bin");
   config_load();
+  cover_settings_load();
   setenv("TZ", tz, 1);
   tzset();
   date_now();
@@ -1241,6 +1378,7 @@ int main(int argc, char **argv) {
   return hardware_run();
 #else
   (void)probe;
+  (void)idle_tick;
   if (sync)
     return sync_once();
   (void)network_tick;
