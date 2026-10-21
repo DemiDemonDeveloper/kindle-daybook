@@ -17,7 +17,7 @@ This is a custom interface running on the existing Kindle Linux system, **not a 
 
 ## Status
 
-**0.2.0 alpha — task controls and pause/resume exit have been tested on the physical KT2. Journal/storage migration and Telegram need verification on the device.** Telegram needs your own bot, created through `@BotFather`. No credentials are included in this repository.
+**0.2.0 alpha — task controls, returning Home, storage migration preserving four existing tasks, and receiving a Telegram journal entry in the live dashboard have been verified on the physical KT2.** Telegram needs your own bot, created through `@BotFather`. No credentials are included in this repository.
 
 ![Progress preview using sample data](docs/progress-preview.png)
 

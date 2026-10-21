@@ -41,3 +41,7 @@ The Mac helper’s `--mac-dialog` option uses a hidden native input box. Tokens 
 Only one device or app may poll the bot. Do not share the bot with another service. Telegram only retains incoming updates for up to 24 hours; this is not an unlimited offline queue. Offline Kindle edits remain local and durable. Live Telegram verification still requires the bot token and on-device Wi-Fi.
 
 Telegram reference: https://core.telegram.org/bots/api#getupdates
+
+## Device verification
+
+On the target KT2, bot pairing and direct HTTPS sync succeeded. A new `/journal` message received a bot reply and appeared in Journal while Daybook was open. Telegram polling runs only while the dashboard is open.
