@@ -1,0 +1,9 @@
+name: Tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make CC=clang test host
+      - run: python3 -m py_compile scripts/install.py scripts/setup-telegram.py

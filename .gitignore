@@ -1,0 +1,15 @@
+/build/
+/dist/
+/runtime/
+/.tools/
+*.log
+*.tmp
+.env
+.env.*
+config.json
+state.json
+history.jsonl
+.DS_Store
+._*
+__pycache__/
+*.pyc
