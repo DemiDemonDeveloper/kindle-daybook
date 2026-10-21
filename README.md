@@ -31,7 +31,7 @@ These images are software previews using sample data. Photos of the real Kindle 
 
 On the physical Kindle, task controls and returning to Home work. Existing task data migrated to the new storage format with four tasks preserved. A journal message sent through Telegram received a reply and appeared in the running dashboard.
 
-The new screen cover has desktop test coverage and awaits physical-device verification.
+The quote cover and tap-to-return have also been verified on the physical Kindle. Custom wallpaper loading and the automatic idle timer have desktop test coverage; their physical-device verification is pending.
 
 Daybook provides a custom dashboard on the existing Kindle Linux system. It does not replace the operating system or install automatic startup. Open it from the Library and use **Menu → Exit dashboard** to return Home.
 

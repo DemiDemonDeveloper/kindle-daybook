@@ -46,4 +46,4 @@ Cover mode is saved separately in `daybook/data/cover-mode.txt`. Include that fi
 
 ## Verification status
 
-Desktop checks cover the idle timer, protection of open editors, wake-tap isolation, saved mode selection, custom quotes, and wallpaper validation. Physical Kindle verification is pending for this new feature. The earlier dashboard, exit, and Telegram journal flow have already been verified on the target KT2.
+Desktop checks cover the idle timer, protection of open editors, wake-tap isolation, saved mode selection, custom quotes, and wallpaper validation. On the physical KT2, opening the quote cover and tapping once to return were verified. Custom wallpaper loading and the automatic idle timer still need physical-device verification. The dashboard, exit, and Telegram journal flow have also been verified on the target KT2.
