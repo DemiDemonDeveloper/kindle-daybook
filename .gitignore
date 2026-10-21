@@ -13,3 +13,5 @@ history.jsonl
 ._*
 __pycache__/
 *.pyc
+
+state.bin

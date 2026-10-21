@@ -25,12 +25,13 @@
 static Model model;
 static unsigned char pixels[W * H];
 static char data_dir[700] = ".", state_path[1024], day[11], month_name[40],
-            status_text[180] = "", draft[TITLE_MAX + 1] = "";
+            status_text[180] = "", draft[JOURNAL_MAX + 1] = "";
 static char token[160] = "", chat_id[40] = "",
             tz[128] = "CST6CDT,M3.2.0,M11.1.0";
 static int tab, page, screen, edit_id, kind, selected_id,
     dirty = 1, poll_seconds = 30, telegram_ready, shift, frame_count;
 static int visible[MAX_TASKS], visible_count;
+static int journal_mode, journal_page, journal_selected, journal_body_page;
 static volatile sig_atomic_t running = 1;
 static pid_t network_pid;
 static int network_type, network_last_ok;
@@ -186,6 +187,8 @@ static void list_indices(void) {
 }
 static void header(const char *title) {
   text(24, 20, title, 3, 0);
+  button(328, 14, 130, 42, "Journal",
+         screen == 5 || screen == 6 || screen == 7);
   button(470, 14, 106, 42, "Menu", 0);
   text(24, 62, day, 2, 0);
   rect(24, 92, 552, 2, 0);
@@ -310,14 +313,154 @@ static void draw_list(void) {
   centered(350, 730, 150, b, 2, 0);
   button(512, 706, 64, 62, ">", 0);
 }
+static size_t journal_line(const char *body, size_t off, char line[36]) {
+  size_t len = strlen(body), end = off;
+  int count = 0;
+  while (end < len && body[end] != '\n' && count < 34) {
+    end++;
+    count++;
+  }
+  size_t next = end;
+  if (end < len && body[end] != '\n') {
+    size_t space = end;
+    while (space > off && body[space] != ' ')
+      space--;
+    if (space > off + 15) {
+      end = space;
+      next = space;
+    }
+  }
+  size_t take = end - off;
+  if (take > 34)
+    take = 34;
+  memcpy(line, body + off, take);
+  line[take] = 0;
+  if (body[next] == '\n')
+    next++;
+  else
+    while (body[next] == ' ')
+      next++;
+  if (next == off && off < len)
+    next++;
+  return next;
+}
+static int journal_pages(const char *body) {
+  size_t off = 0;
+  int lines = 0;
+  while (body[off]) {
+    char line[36];
+    off = journal_line(body, off, line);
+    lines++;
+  }
+  return lines ? (lines - 1) / 22 + 1 : 1;
+}
+static void draw_journal_list(void) {
+  header("JOURNAL");
+  text(24, 116, "A place for your thoughts.", 2, 0);
+  int pages = model.journal_count ? (model.journal_count - 1) / 4 + 1 : 1;
+  if (journal_page >= pages)
+    journal_page = pages - 1;
+  if (journal_page < 0)
+    journal_page = 0;
+  if (!model.journal_count) {
+    text(24, 286, "Start with a few words.", 2, 0);
+    text(24, 332, "Tap + Write below.", 2, 0);
+  }
+  for (int row = 0; row < 4; row++) {
+    int index = model.journal_count - 1 - journal_page * 4 - row;
+    if (index < 0)
+      break;
+    JournalEntry *e = &model.journal[index];
+    int y = 166 + row * 116;
+    char label[60], preview[100];
+    snprintf(label, sizeof(label), "%s  J%d", e->day, e->id);
+    text(24, y, label, 2, 0);
+    snprintf(preview, sizeof(preview), "%.90s", e->body);
+    for (char *c = preview; *c; c++)
+      if (*c == '\n' || *c == '\r')
+        *c = ' ';
+    wrapped(24, y + 30, preview, 29, 2, 2);
+    text(548, y + 30, ">", 2, 0);
+    rect(24, y + 100, 552, 1, 0);
+  }
+  button(24, 706, 240, 62, "+ Write", 1);
+  button(286, 706, 64, 62, "<", 0);
+  char label[30];
+  snprintf(label, sizeof(label), "%d/%d", journal_page + 1, pages);
+  centered(350, 730, 150, label, 2, 0);
+  button(512, 706, 64, 62, ">", 0);
+}
+static void draw_journal_entry(void) {
+  JournalEntry *e = journal_find(&model, journal_selected);
+  if (!e) {
+    screen = 5;
+    draw_journal_list();
+    return;
+  }
+  header("JOURNAL");
+  char label[70];
+  snprintf(label, sizeof(label), "%s | Entry J%d", e->day, e->id);
+  text(24, 110, label, 2, 0);
+  int pages = journal_pages(e->body);
+  if (journal_body_page >= pages)
+    journal_body_page = pages - 1;
+  if (journal_body_page < 0)
+    journal_body_page = 0;
+  size_t off = 0;
+  int line_number = 0, drawn = 0;
+  while (e->body[off]) {
+    char line[36];
+    off = journal_line(e->body, off, line);
+    if (line_number++ >= journal_body_page * 22) {
+      text(24, 156 + drawn * 18, line, 2, 0);
+      if (++drawn >= 22)
+        break;
+    }
+  }
+  button(24, 610, 176, 56, "Edit", 0);
+  button(212, 610, 176, 56, screen == 7 ? "Confirm" : "Delete?", screen == 7);
+  button(400, 610, 176, 56, "Back", 0);
+  if (screen == 7)
+    text(24, 680, "Confirm deletes this entry.", 2, 0);
+  button(24, 716, 100, 56, "<", 0);
+  snprintf(label, sizeof(label), "%d/%d", journal_body_page + 1, pages);
+  centered(124, 735, 352, label, 2, 0);
+  button(476, 716, 100, 56, ">", 0);
+}
+static void journal_edit(int id) {
+  journal_mode = 1;
+  edit_id = id;
+  JournalEntry *e = journal_find(&model, id);
+  snprintf(draft, sizeof(draft), "%s", e ? e->body : "");
+  screen = 1;
+  status_text[0] = 0;
+  dirty = 1;
+}
 static const char *keys[] = {"1234567890", "qwertyuiop", "asdfghjkl",
                              "zxcvbnm"};
 static void draw_editor(void) {
-  header(edit_id ? "EDIT TASK" : "NEW TASK");
-  wrapped(24, 116, *draft ? draft : "Type a task below", 23, 4, 2);
-  button(24, 246, 176, 52, "To-do", kind == 0);
-  button(212, 246, 176, 52, "Daily", kind == 1);
-  button(400, 246, 176, 52, "Goal", kind == 2);
+  header(journal_mode ? (edit_id ? "EDIT JOURNAL" : "NEW JOURNAL")
+                      : (edit_id ? "EDIT TASK" : "NEW TASK"));
+  if (journal_mode) {
+    const char *tail = draft;
+    size_t len = strlen(draft);
+    if (len > 136) {
+      tail = draft + len - 136;
+      while ((*tail & 0xc0) == 0x80)
+        tail++;
+    }
+    wrapped(24, 116, *draft ? tail : "Write whatever is on your mind.", 34, 4,
+            2);
+    char count[70];
+    snprintf(count, sizeof(count), "%zu/%d bytes | Enter adds a line", len,
+             JOURNAL_MAX);
+    text(24, 248, count, 1, 0);
+  } else {
+    wrapped(24, 116, *draft ? draft : "Type a task below", 23, 4, 2);
+    button(24, 246, 176, 52, "To-do", kind == 0);
+    button(212, 246, 176, 52, "Daily", kind == 1);
+    button(400, 246, 176, 52, "Goal", kind == 2);
+  }
   for (int row = 0; row < 4; row++)
     for (int col = 0; keys[row][col]; col++) {
       char c[2] = {keys[row][col], 0};
@@ -328,7 +471,7 @@ static void draw_editor(void) {
   button(423, 520, 174, 56, "Delete", 0);
   button(3, 590, 114, 56, shift ? "abc" : "ABC", 0);
   button(123, 590, 354, 56, "Space", 0);
-  button(483, 590, 114, 56, "-", 0);
+  button(483, 590, 114, 56, journal_mode ? "Enter" : "-", 0);
   button(24, 704, 264, 64, "Cancel", 0);
   button(312, 704, 264, 64, "Save", 1);
   if (*status_text)
@@ -362,7 +505,7 @@ static void draw_detail(void) {
 }
 static void draw_menu(void) {
   header("SETTINGS");
-  text(24, 128, "Daybook 0.1.0 alpha", 2, 0);
+  text(24, 128, "Daybook 0.2.0 alpha", 2, 0);
   text(24, 170, "Dedicated task dashboard", 2, 0);
   text(24, 224,
        telegram_ready ? "Telegram configured" : "Telegram not configured", 2,
@@ -389,6 +532,12 @@ static int write_frame(const char *file) {
   return ok;
 }
 static void render(const char *snapshot) {
+  if (!snapshot) {
+    char err[180] = "Save failed";
+    if (!model_save(&model, state_path, err, sizeof(err)))
+      snprintf(status_text, sizeof(status_text), "%s", err);
+  }
+
   memset(pixels, 255, sizeof(pixels));
   if (screen == 1)
     draw_editor();
@@ -396,6 +545,10 @@ static void render(const char *snapshot) {
     draw_detail();
   else if (screen == 3)
     draw_menu();
+  else if (screen == 5)
+    draw_journal_list();
+  else if (screen == 6 || screen == 7)
+    draw_journal_entry();
   else
     draw_list();
   char frame[1024];
@@ -428,19 +581,18 @@ static void render(const char *snapshot) {
 }
 static void history(const char *command) {
   char p[1024];
-  path(p, sizeof(p), "history.jsonl");
+  path(p, sizeof(p), "history.log");
   FILE *f = fopen(p, "a");
   if (!f)
     return;
-  cJSON *o = cJSON_CreateObject();
-  cJSON_AddStringToObject(o, "day", day);
-  cJSON_AddStringToObject(o, "command", command);
-  char *s = cJSON_PrintUnformatted(o);
-  if (s) {
-    fprintf(f, "%s\n", s);
-    free(s);
-  }
-  cJSON_Delete(o);
+  fprintf(f, "%s\t", day);
+  const char *record =
+      !strncmp(command, "/journal", 8) || !strncmp(command, "/jedit", 6)
+          ? "Journal entry saved or edited"
+          : command;
+  for (const unsigned char *c = (const unsigned char *)record; *c; c++)
+    fputc(*c == '\n' || *c == '\r' || *c == '\t' ? ' ' : *c, f);
+  fputc('\n', f);
   fclose(f);
 }
 static int apply(const char *command) {
@@ -459,6 +611,7 @@ static int apply(const char *command) {
   return changed;
 }
 static void edit_open(int id) {
+  journal_mode = 0;
   edit_id = id;
   Task *t = task_find(&model, id);
   draft[0] = 0;
@@ -472,11 +625,62 @@ static void edit_open(int id) {
   dirty = 1;
 }
 static void touch(int x, int y) {
-  char cmd[256];
+  char cmd[JOURNAL_MAX + 64];
   dirty = 1;
   status_text[0] = 0;
+  if (x >= 328 && x < 458 && y < 58) {
+    screen = 5;
+    journal_page = 0;
+    return;
+  }
   if (x >= 470 && y < 90) {
     screen = 3;
+    return;
+  }
+  if (screen == 5) {
+    if (y >= 166 && y < 630) {
+      int index = model.journal_count - 1 - journal_page * 4 - (y - 166) / 116;
+      if (index >= 0 && index < model.journal_count) {
+        journal_selected = model.journal[index].id;
+        journal_body_page = 0;
+        screen = 6;
+      }
+    } else if (y >= 706) {
+      if (x < 270)
+        journal_edit(0);
+      else if (x < 350 && journal_page > 0)
+        journal_page--;
+      else if (x >= 512 && (journal_page + 1) * 4 < model.journal_count)
+        journal_page++;
+    }
+    return;
+  }
+  if (screen == 6 || screen == 7) {
+    JournalEntry *e = journal_find(&model, journal_selected);
+    if (!e) {
+      screen = 5;
+      return;
+    }
+    if (y >= 610 && y < 666) {
+      if (x < 206)
+        journal_edit(e->id);
+      else if (x < 394) {
+        if (screen == 7) {
+          snprintf(cmd, sizeof(cmd), "/jdelete %d", e->id);
+          if (apply(cmd))
+            screen = 5;
+        } else
+          screen = 7;
+      } else
+        screen = 5;
+    } else if (screen == 7)
+      screen = 6;
+    else if (y >= 716) {
+      if (x < 124 && journal_body_page > 0)
+        journal_body_page--;
+      else if (x >= 476 && journal_body_page + 1 < journal_pages(e->body))
+        journal_body_page++;
+    }
     return;
   }
   if (screen == 0) {
@@ -528,7 +732,7 @@ static void touch(int x, int y) {
     return;
   }
   if (screen == 1) {
-    if (y >= 246 && y < 298 && !edit_id) {
+    if (y >= 246 && y < 298 && !edit_id && !journal_mode) {
       kind = x < 206 ? 0 : x < 394 ? 1 : 2;
       return;
     }
@@ -536,9 +740,14 @@ static void touch(int x, int y) {
       int row = (y - 334) / 62, col = x / 60;
       size_t len = strlen(draft);
       if (row == 3 && x >= 420) {
-        if (len)
-          draft[len - 1] = 0;
-      } else if (row < 4 && col < (int)strlen(keys[row]) && len < TITLE_MAX) {
+        if (len) {
+          size_t start = len - 1;
+          while (start > 0 && ((unsigned char)draft[start] & 0xc0) == 0x80)
+            start--;
+          draft[start] = 0;
+        }
+      } else if (row < 4 && col < (int)strlen(keys[row]) &&
+                 len < (size_t)(journal_mode ? JOURNAL_MAX : TITLE_MAX)) {
         draft[len] = shift ? (char)toupper((unsigned char)keys[row][col])
                            : keys[row][col];
         draft[len + 1] = 0;
@@ -549,17 +758,22 @@ static void touch(int x, int y) {
       size_t len = strlen(draft);
       if (x < 120)
         shift = !shift;
-      else if (len < TITLE_MAX) {
-        draft[len] = x < 480 ? ' ' : '-';
+      else if (len < (size_t)(journal_mode ? JOURNAL_MAX : TITLE_MAX)) {
+        draft[len] = x < 480 ? ' ' : journal_mode ? '\n' : '-';
         draft[len + 1] = 0;
       }
       return;
     }
     if (y >= 704) {
       if (x < 300)
-        screen = 0;
+        screen = journal_mode ? (edit_id ? 6 : 5) : 0;
       else {
-        if (edit_id)
+        if (journal_mode) {
+          if (edit_id)
+            snprintf(cmd, sizeof(cmd), "/jedit %d %s", edit_id, draft);
+          else
+            snprintf(cmd, sizeof(cmd), "/journal %s", draft);
+        } else if (edit_id)
           snprintf(cmd, sizeof(cmd), "/edit %d %s", edit_id, draft);
         else
           snprintf(cmd, sizeof(cmd), "/%s %s",
@@ -568,7 +782,7 @@ static void touch(int x, int y) {
                                : "add",
                    draft);
         if (apply(cmd))
-          screen = 0;
+          screen = journal_mode ? 5 : 0;
       }
     }
     return;
@@ -910,7 +1124,12 @@ int main(int argc, char **argv) {
             : !strcmp(v, "goals")    ? 2
             : !strcmp(v, "progress") ? 3
                                      : 0;
-    } else if (!strcmp(argv[i], "--demo"))
+    } else if (!strcmp(argv[i], "--journal-entry") && i + 1 < argc) {
+      journal_selected = atoi(argv[++i]);
+      screen = 6;
+    } else if (!strcmp(argv[i], "--journal"))
+      screen = 5;
+    else if (!strcmp(argv[i], "--demo"))
       demo = 1;
     else if (!strcmp(argv[i], "--probe"))
       probe = 1;
@@ -924,13 +1143,21 @@ int main(int argc, char **argv) {
   signal(SIGTERM, die_signal);
   signal(SIGPIPE, SIG_IGN);
   mkdir(data_dir, 0700);
-  path(state_path, sizeof(state_path), "state.json");
+  path(state_path, sizeof(state_path), "state.bin");
   config_load();
   setenv("TZ", tz, 1);
   tzset();
   date_now();
   char err[256] = "Cannot read task data";
-  if (!model_load(&model, state_path, err, sizeof(err))) {
+  char load_path[1024];
+  snprintf(load_path, sizeof(load_path), "%s", state_path);
+  if (access(state_path, F_OK) != 0) {
+    char legacy[1024];
+    path(legacy, sizeof(legacy), "state.json");
+    if (access(legacy, F_OK) == 0)
+      snprintf(load_path, sizeof(load_path), "%s", legacy);
+  }
+  if (!model_load(&model, load_path, err, sizeof(err))) {
     fprintf(stderr, "%s\n", err);
     return 1;
   }

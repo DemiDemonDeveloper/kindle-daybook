@@ -34,12 +34,20 @@ def api(token, method, payload):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--data', type=Path, required=True, help='Kindle daybook/data folder')
+    parser.add_argument('--mac-dialog', action='store_true', help='Use a hidden native Mac prompt for the token')
     args = parser.parse_args()
     target = args.data / 'config.json'
     if target.exists():
         raise SystemExit('A config already exists. Back it up and remove it before deliberately pairing a new bot.')
     print('Create a NEW bot in Telegram using @BotFather and /newbot.')
-    token = getpass.getpass('Paste its bot token (hidden): ').strip()
+    if args.mac_dialog:
+        prompt = 'text returned of (display dialog "Paste the Telegram bot token from BotFather. It will be stored only in your Kindle Daybook settings." with title "Connect Daybook to Telegram" default answer "" with hidden answer buttons {"Cancel", "Connect"} default button "Connect")'
+        result = subprocess.run(['osascript', '-e', prompt], text=True, capture_output=True)
+        if result.returncode:
+            raise SystemExit('Pairing cancelled. No token was saved.')
+        token = result.stdout.strip()
+    else:
+        token = getpass.getpass('Paste its bot token (hidden): ').strip()
     if not re.fullmatch(r'[0-9]+:[A-Za-z0-9_-]+', token):
         raise SystemExit('The token format looks incorrect.')
     bot = api(token, 'getMe', {})

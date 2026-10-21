@@ -13,26 +13,42 @@ if ! mkdir "$LOCK" 2>/dev/null; then
  mkdir "$LOCK" || exit 1
 fi
 echo "$$" > "$LOCK/pid"
-trap 'rm -f "$LOCK/pid"; rmdir "$LOCK" 2>/dev/null || true' EXIT
+child=""
+wm_pids=""
+pillow_disabled=0
+snapshot="$APP/data/stock-screen.dump"
+cleanup() {
+ trap - EXIT INT TERM HUP
+ if [ -n "$child" ]; then kill "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; fi
+ # Restore pixels before resuming the stock window manager, as KOReader does.
+ if [ -s "$snapshot" ]; then cat "$snapshot" > /dev/fb0 2>/dev/null || true; rm -f "$snapshot"; fi
+ for pid in $wm_pids; do kill -CONT "$pid" 2>/dev/null || true; done
+ if [ "$pillow_disabled" = 1 ]; then lipc-set-prop com.lab126.pillow disableEnablePillow enable 2>/dev/null || true; fi
+ lipc-set-prop com.lab126.powerd preventScreenSaver 0 2>/dev/null || true
+ lipc-set-prop com.lab126.appmgrd start app://com.lab126.booklet.home 2>/dev/null || true
+ "$APP/../libkh/bin/fbink" -q -s 2>/dev/null || true
+ rm -f "$LOCK/pid"
+ rmdir "$LOCK" 2>/dev/null || true
+ echo "Daybook exit: stock interface resumed; framework was never stopped"
+}
+trap cleanup EXIT INT TERM HUP
 if ! "$APP/bin/daybook" --data "$APP/data" --probe; then
  eips 0 5 "Daybook needs attention. Reconnect USB."
  exit 1
 fi
-# Probe before suspending the stock interface. A normal exit restores it.
-framework_was_running=0
-if status framework 2>/dev/null | grep -q running; then framework_was_running=1; fi
-child=""
-cleanup() {
- trap - EXIT INT TERM HUP
- rm -f "$LOCK/pid"
- rmdir "$LOCK" 2>/dev/null || true
- if [ -n "$child" ]; then kill "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; fi
- lipc-set-prop com.lab126.powerd preventScreenSaver 0 2>/dev/null || true
- if [ "$framework_was_running" = 1 ]; then start framework 2>/dev/null || true; fi
-}
-trap cleanup EXIT INT TERM HUP
+# Never stop or restart the Amazon framework. It retains its live application state.
+if ! cat /dev/fb0 > "$snapshot" || [ ! -s "$snapshot" ]; then
+ echo "Could not preserve stock framebuffer; launch cancelled"
+ exit 1
+fi
+if lipc-set-prop com.lab126.pillow disableEnablePillow disable; then pillow_disabled=1; fi
+pids=$(pidof awesome 2>/dev/null || true)
+if [ -z "$pids" ]; then echo "Window manager not found; launch cancelled"; exit 1; fi
+for pid in $pids; do
+ if kill -STOP "$pid"; then wm_pids="$wm_pids $pid"; else exit 1; fi
+done
 lipc-set-prop com.lab126.powerd preventScreenSaver 1 2>/dev/null || true
-if [ "$framework_was_running" = 1 ]; then stop framework || exit 1; fi
+echo "Daybook launch: framework preserved; window manager paused"
 "$APP/bin/daybook" --data "$APP/data" &
 child=$!
 wait "$child"

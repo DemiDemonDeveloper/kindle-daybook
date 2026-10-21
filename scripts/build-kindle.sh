@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 export ZIG_GLOBAL_CACHE_DIR="$PWD/.tools/zig-cache"
 export ZIG_LOCAL_CACHE_DIR="$PWD/.tools/zig-local"
 mkdir -p build dist/daybook/bin dist/daybook/data dist/documents
-"$ZIG" cc -target arm-linux-musleabi -mcpu=cortex_a9 -static -Os -std=c11 -Wall -Wextra -Werror src/daybook.c src/model.c vendor/cJSON.c -lm -o build/daybook-arm
+"$ZIG" cc -target arm-linux-musleabi -mcpu=cortex_a9 -static -Os -std=c11 -Wall -Wextra -Werror src/daybook.c src/model.c src/store.c vendor/cJSON.c -lm -o build/daybook-arm
 cp build/daybook-arm dist/daybook/bin/daybook
 cp scripts/run-dashboard.sh dist/daybook/run-dashboard.sh
 cp scripts/Daybook.sh dist/documents/Daybook.sh

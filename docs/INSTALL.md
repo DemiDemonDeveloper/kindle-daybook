@@ -9,10 +9,10 @@ This package runs a custom native interface. It does not flash firmware or chang
 3. On the Mac, run `python3 scripts/install.py --volume /Volumes/Kindle`.
 4. Safely eject the Kindle and unplug the cable.
 5. In Library → All items, open **Daybook** once.
-6. Add a task, mark it complete, reopen it, and check the Progress tab.
+6. Add a task, mark it complete, reopen it, and check the Progress tab. Open Journal in the header to write and read a dated entry.
 7. Use Menu → Exit dashboard before reconnecting USB. Verify that your task survives reopening the app.
 
-The launcher checks the executable and touchscreen before suspending the Kindle interface. It restores the interface and normal screen-saver settings when the app exits. If launching fails, reconnect USB and inspect `daybook/data/launch.log` and `launcher.log`. Task data lives in `daybook/data/state.json`.
+The launcher checks the executable and touchscreen, preserves the current framebuffer, and pauses the stock window manager. It keeps the framework alive, then restores the screen, resumes the window manager, and opens Home on exit. It also restores normal screen-saver settings. If launching fails, reconnect USB and inspect `daybook/data/launch.log` and `launcher.log`. Task and journal data live in `daybook/data/state.bin`. On the first 0.2 launch, an existing `state.json` is imported while the original is preserved.
 
 ## Recovery
 

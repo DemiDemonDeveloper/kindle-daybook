@@ -14,11 +14,18 @@ static void copy(char *d, const char *s, size_t n) {
 void model_init(Model *m) {
   memset(m, 0, sizeof(*m));
   m->next_id = 1;
+  m->next_journal_id = 1;
 }
 Task *task_find(Model *m, int id) {
   for (int i = 0; i < m->count; i++)
     if (m->tasks[i].id == id)
       return &m->tasks[i];
+  return NULL;
+}
+JournalEntry *journal_find(Model *m, int id) {
+  for (int i = 0; i < m->journal_count; i++)
+    if (m->journal[i].id == id)
+      return &m->journal[i];
   return NULL;
 }
 int task_done(const Task *t, const char *day) {
@@ -75,7 +82,7 @@ static int integer(cJSON *v, int min, int max) {
   return cJSON_IsNumber(v) && v->valuedouble >= min && v->valuedouble <= max &&
          v->valuedouble == (double)v->valueint;
 }
-int model_load(Model *m, const char *path, char *err, size_t n) {
+int legacy_model_load(Model *m, const char *path, char *err, size_t n) {
   FILE *f = fopen(path, "rb");
   if (!f) {
     if (errno == ENOENT) {
@@ -85,7 +92,7 @@ int model_load(Model *m, const char *path, char *err, size_t n) {
     snprintf(err, n, "Cannot open task file: %s", strerror(errno));
     return 0;
   }
-  if (fseek(f, 0, SEEK_END) || ftell(f) > 1024 * 1024) {
+  if (fseek(f, 0, SEEK_END) || ftell(f) > 4 * 1024 * 1024) {
     fclose(f);
     copy(err, "Task file is too large", n);
     return 0;
@@ -107,7 +114,7 @@ int model_load(Model *m, const char *path, char *err, size_t n) {
         *next = cJSON_GetObjectItemCaseSensitive(j, "next_id"),
         *offset = cJSON_GetObjectItemCaseSensitive(j, "telegram_offset");
   int ok = cJSON_IsObject(j) &&
-           integer(cJSON_GetObjectItemCaseSensitive(j, "schema"), 1, 2) &&
+           integer(cJSON_GetObjectItemCaseSensitive(j, "schema"), 1, 3) &&
            cJSON_IsArray(a) && cJSON_GetArraySize(a) <= MAX_TASKS &&
            integer(next, 1, INT_MAX - 1);
   if (ok) {
@@ -195,6 +202,41 @@ int model_load(Model *m, const char *path, char *err, size_t n) {
       }
     }
   }
+  cJSON *entries = cJSON_GetObjectItemCaseSensitive(j, "journal"),
+        *next_j = cJSON_GetObjectItemCaseSensitive(j, "next_journal_id");
+  int schema = cJSON_GetObjectItemCaseSensitive(j, "schema")
+                   ? cJSON_GetObjectItemCaseSensitive(j, "schema")->valueint
+                   : 0;
+  if (entries || schema == 3) {
+    if (!cJSON_IsArray(entries) || cJSON_GetArraySize(entries) > MAX_JOURNAL ||
+        !integer(next_j, 1, INT_MAX - 1))
+      ok = 0;
+    else {
+      tmp.next_journal_id = next_j->valueint;
+      int max_j = 0;
+      cJSON *entry;
+      cJSON_ArrayForEach(entry, entries) {
+        cJSON *id = cJSON_GetObjectItemCaseSensitive(entry, "id"),
+              *date = cJSON_GetObjectItemCaseSensitive(entry, "day"),
+              *body = cJSON_GetObjectItemCaseSensitive(entry, "body");
+        if (!integer(id, 1, INT_MAX - 2) || !cJSON_IsString(date) ||
+            strlen(date->valuestring) != 10 || !cJSON_IsString(body) ||
+            !body->valuestring[0] || strlen(body->valuestring) > JOURNAL_MAX ||
+            journal_find(&tmp, id->valueint)) {
+          ok = 0;
+          break;
+        }
+        JournalEntry *e = &tmp.journal[tmp.journal_count++];
+        e->id = id->valueint;
+        copy(e->day, date->valuestring, sizeof(e->day));
+        copy(e->body, body->valuestring, sizeof(e->body));
+        if (e->id > max_j)
+          max_j = e->id;
+      }
+      if (tmp.next_journal_id <= max_j)
+        ok = 0;
+    }
+  }
   if (tmp.next_id <= max_id)
     ok = 0;
   cJSON_Delete(j);
@@ -203,89 +245,6 @@ int model_load(Model *m, const char *path, char *err, size_t n) {
     return 0;
   }
   *m = tmp;
-  return 1;
-}
-int model_save(const Model *m, const char *path, char *err, size_t n) {
-  cJSON *j = cJSON_CreateObject(), *a = cJSON_CreateArray();
-  if (!j || !a) {
-    cJSON_Delete(j);
-    cJSON_Delete(a);
-    return 0;
-  }
-  cJSON_AddNumberToObject(j, "schema", 2);
-  cJSON_AddNumberToObject(j, "next_id", m->next_id);
-  cJSON_AddNumberToObject(j, "telegram_offset", (double)m->offset);
-  cJSON_AddItemToObject(j, "tasks", a);
-  for (int i = 0; i < m->count; i++) {
-    const Task *t = &m->tasks[i];
-    cJSON *o = cJSON_CreateObject();
-    cJSON_AddNumberToObject(o, "id", t->id);
-    cJSON_AddNumberToObject(o, "kind", t->kind);
-    cJSON_AddStringToObject(o, "title", t->title);
-    cJSON_AddStringToObject(o, "period", t->period);
-    cJSON_AddStringToObject(o, "completed_on", t->completed_on);
-    cJSON_AddBoolToObject(o, "done", t->done);
-    cJSON *days = cJSON_AddArrayToObject(o, "days");
-    for (int k = 0; k < t->days_count; k++)
-      cJSON_AddItemToArray(days, cJSON_CreateString(t->days[k]));
-    cJSON_AddItemToArray(a, o);
-  }
-  cJSON *ps = cJSON_AddArrayToObject(j, "progress");
-  for (int i = 0; i < m->progress_count; i++) {
-    const DayProgress *d = &m->progress[i];
-    cJSON *o = cJSON_CreateObject();
-    cJSON_AddStringToObject(o, "day", d->day);
-    cJSON_AddNumberToObject(o, "total", d->total);
-    cJSON_AddNumberToObject(o, "done", d->done);
-    cJSON_AddNumberToObject(o, "habit_total", d->habit_total);
-    cJSON_AddNumberToObject(o, "habit_done", d->habit_done);
-    cJSON_AddItemToArray(ps, o);
-  }
-  char *s = cJSON_PrintUnformatted(j);
-  cJSON_Delete(j);
-  if (!s)
-    return 0;
-  char tmp[1024];
-  if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp)) {
-    free(s);
-    return 0;
-  }
-  int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600), ok = fd >= 0;
-  size_t len = strlen(s), off = 0;
-  while (ok && off < len) {
-    ssize_t w = write(fd, s + off, len - off);
-    if (w < 0 && errno == EINTR)
-      continue;
-    if (w <= 0)
-      ok = 0;
-    else
-      off += (size_t)w;
-  }
-  free(s);
-  if (fd >= 0) {
-    if (ok && fsync(fd))
-      ok = 0;
-    if (close(fd))
-      ok = 0;
-  }
-  if (ok && rename(tmp, path))
-    ok = 0;
-  if (!ok) {
-    snprintf(err, n, "Could not save tasks: %s", strerror(errno));
-    unlink(tmp);
-    return 0;
-  }
-  char dir[1024];
-  copy(dir, path, sizeof(dir));
-  char *slash = strrchr(dir, '/');
-  if (slash) {
-    *slash = 0;
-    int dfd = open(*dir ? dir : "/", O_RDONLY);
-    if (dfd >= 0) {
-      fsync(dfd);
-      close(dfd);
-    }
-  }
   return 1;
 }
 static void append(char *out, size_t n, const char *s) {
@@ -297,10 +256,11 @@ static const char *help =
     "Commands:\n/add Buy groceries\n/daily Read for 20 minutes\n/goal Finish "
     "portfolio\n/list\n/habits\n/progress\n/done 3\n/undo 3\n/edit 3 New "
     "title\n/delete 3\nDaily routines reset each day. Goals belong to their "
-    "creation month.";
+    "creation month.\nJournal: /journal Your thoughts\n/journal (list)\n/jread "
+    "1\n/jedit 1 New thoughts\n/jdelete 1";
 static int command_inner(Model *m, const char *input, const char *day,
                          char *reply, size_t n) {
-  char b[512];
+  char b[JOURNAL_MAX + 64];
   reply[0] = 0;
   if (!input || strlen(input) >= sizeof(b)) {
     copy(reply, "Message is too long", n);
@@ -319,7 +279,7 @@ static int command_inner(Model *m, const char *input, const char *day,
   }
   char cmd[32] = "/add", *arg = s;
   if (*s == '/') {
-    arg = strchr(s, ' ');
+    arg = strpbrk(s, " \t\r\n");
     if (arg)
       *arg++ = 0;
     else
@@ -334,6 +294,76 @@ static int command_inner(Model *m, const char *input, const char *day,
   if (!strcmp(cmd, "/start") || !strcmp(cmd, "/help")) {
     copy(reply, help, n);
     return 0;
+  }
+  if (!strcmp(cmd, "/journal")) {
+    if (!*arg) {
+      copy(reply, "Journal entries:\n", n);
+      if (!m->journal_count)
+        append(reply, n, "No entries yet. Use /journal Your thoughts");
+      for (int i = m->journal_count - 1; i >= 0 && i >= m->journal_count - 8;
+           i--) {
+        JournalEntry *e = &m->journal[i];
+        char preview[70], line[120];
+        copy(preview, e->body, sizeof(preview));
+        for (char *p = preview; *p; p++)
+          if (*p == '\n' || *p == '\r')
+            *p = ' ';
+        snprintf(line, sizeof(line), "J%d %s: %s\n", e->id, e->day, preview);
+        append(reply, n, line);
+      }
+      append(reply, n, "\nRead an entry with /jread NUMBER");
+      return 0;
+    }
+    if (strlen(arg) > JOURNAL_MAX) {
+      copy(reply, "Entry is too long; use up to 2048 bytes", n);
+      return 0;
+    }
+    if (m->journal_count >= MAX_JOURNAL || m->next_journal_id >= INT_MAX - 1) {
+      copy(reply, "Journal is full; delete an old entry first", n);
+      return 0;
+    }
+    JournalEntry *e = &m->journal[m->journal_count++];
+    e->id = m->next_journal_id++;
+    copy(e->day, day, sizeof(e->day));
+    copy(e->body, arg, sizeof(e->body));
+    snprintf(reply, n, "Saved journal J%d for %s", e->id, e->day);
+    return 1;
+  }
+  if (!strcmp(cmd, "/jread") || !strcmp(cmd, "/jedit") ||
+      !strcmp(cmd, "/jdelete")) {
+    char *end;
+    errno = 0;
+    long id = strtol(arg, &end, 10);
+    while (isspace((unsigned char)*end))
+      end++;
+    if (errno || id <= 0 || id > INT_MAX - 2 || end == arg ||
+        (strcmp(cmd, "/jedit") && *end)) {
+      copy(reply, "Use a journal number from /journal", n);
+      return 0;
+    }
+    JournalEntry *e = journal_find(m, (int)id);
+    if (!e) {
+      copy(reply, "Journal entry not found", n);
+      return 0;
+    }
+    if (!strcmp(cmd, "/jread")) {
+      snprintf(reply, n, "J%d | %s\n\n%s", e->id, e->day, e->body);
+      return 0;
+    }
+    if (!strcmp(cmd, "/jedit")) {
+      if (!*end || strlen(end) > JOURNAL_MAX) {
+        copy(reply, "Use /jedit NUMBER New entry (up to 2048 bytes)", n);
+        return 0;
+      }
+      copy(e->body, end, sizeof(e->body));
+      snprintf(reply, n, "Updated journal J%d", e->id);
+      return 1;
+    }
+    int index = (int)(e - m->journal);
+    memmove(e, e + 1, (size_t)(m->journal_count - index - 1) * sizeof(*e));
+    m->journal_count--;
+    snprintf(reply, n, "Deleted journal J%ld", id);
+    return 1;
   }
   if (!strcmp(cmd, "/progress")) {
     const DayProgress *p = model_progress(m, day);

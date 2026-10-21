@@ -68,6 +68,32 @@ int main(void) {
   assert(model_load(&loaded, state_path, reply, sizeof(reply)));
   assert(loaded.progress_count == 90 &&
          task_find(&loaded, 4)->days_count == 90);
+  cJSON *journal_update = cJSON_Parse(
+      "[{\"update_id\":4,\"message\":{\"chat\":{\"id\":12345,\"type\":"
+      "\"private\"},\"text\":\"/journal Telegram journal test\"}}]");
+  assert(journal_update);
+  network_updates(journal_update);
+  assert(model.journal_count == 1 && model.offset == 5);
+  network_updates(journal_update);
+  assert(model.journal_count == 1);
+  cJSON_Delete(journal_update);
+  assert(apply("/jdelete 1"));
+  touch(390, 30);
+  assert(screen == 5);
+  touch(50, 740);
+  assert(screen == 1 && journal_mode);
+  touch(30, 485);
+  touch(530, 620);
+  touch(30, 485);
+  touch(400, 740);
+  assert(screen == 5 && model.journal_count == 1 &&
+         !strcmp(model.journal[0].body, "a\na"));
+  touch(100, 200);
+  assert(screen == 6);
+  touch(250, 630);
+  assert(screen == 7 && model.journal_count == 1);
+  touch(250, 630);
+  assert(screen == 5 && model.journal_count == 0);
   puts("PASS: touch keyboard/add/toggle, delete confirmation, Telegram owner "
        "authorization and replay protection, and persisted habit/graph history "
        "retention.");

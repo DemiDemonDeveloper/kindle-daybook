@@ -12,13 +12,16 @@ This is a custom interface running on the existing Kindle Linux system, **not a 
 - Touch controls to add, rename, complete, reopen, and delete tasks. Deletion requires confirmation on the Kindle.
 - Progress: 14-day completion graph and a seven-day habit grid, backed by saved history.
 - Direct Telegram bot integration: add, edit, list, delete, complete, and undo tasks. No always-on Mac or separate hosting server is needed while the dashboard runs and the Kindle has Wi-Fi.
-- Local-first JSON storage with atomic replacement. The app does not wipe malformed task data.
+- Local C records and strings in a checksummed, versioned binary file, saved atomically before screen refreshes. Existing task JSON is imported once; screen rendering reads memory.
+- A dated journal with multiline entries, editing, confirmed deletion, and Telegram commands.
 
 ## Status
 
-**0.1.0 alpha — desktop logic and ARM builds are tested; touchscreen, power behavior, and Telegram require on-device testing.** Telegram needs your own bot, created through `@BotFather`. No credentials are included in this repository.
+**0.2.0 alpha — task controls and pause/resume exit have been tested on the physical KT2. Journal/storage migration and Telegram need verification on the device.** Telegram needs your own bot, created through `@BotFather`. No credentials are included in this repository.
 
 ![Progress preview using sample data](docs/progress-preview.png)
+
+![Journal preview using sample data](docs/journal-preview.png)
 
 See [Installation](docs/INSTALL.md), [Telegram setup](docs/TELEGRAM.md), and [Architecture](docs/ARCHITECTURE.md).
 
@@ -42,7 +45,7 @@ Task files, tokens, request/response caches, logs, and runtime data are ignored 
 ## Deliberate alpha limits
 
 - 600×800 portrait layout, matching the target Kindle.
-- Up to 256 tasks, 90 daily progress snapshots, and 90 completed dates per habit.
+- Up to 256 tasks, 90 daily progress snapshots, 90 completed dates per habit, and 128 journal entries of up to 2048 bytes each.
 - Initial display font and on-screen keyboard use ASCII; other characters are stored but displayed as `?`.
 - The dashboard stays awake while active. Exit from Menu before connecting USB. Telegram sync pauses when the app is closed or the Kindle is offline.
 - No automatic startup, firmware flashing, reminders, arbitrary natural-language date parsing, or background sync while asleep in this release.

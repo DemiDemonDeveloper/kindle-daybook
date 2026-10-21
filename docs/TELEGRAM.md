@@ -5,7 +5,7 @@ Use a fresh personal bot for Daybook. Setup runs on your Mac; afterward the Kind
 1. In Telegram, open the verified **@BotFather**, send `/newbot`, and follow its prompts.
 2. Keep the token private. Do not paste it into GitHub or this chat.
 3. Install Daybook, then connect the Kindle by USB while Daybook is closed.
-4. Run `python3 scripts/setup-telegram.py --data /Volumes/Kindle/daybook/data`.
+4. Run `python3 scripts/setup-telegram.py --data /Volumes/Kindle/daybook/data --mac-dialog`.
 5. Paste the token into the hidden prompt. Send the generated pairing command to your new bot in a private chat.
 6. Safely eject, unplug, and launch Daybook. Sync runs approximately every 30 seconds.
 
@@ -24,10 +24,19 @@ Commands:
 /undo 3
 /edit 3 Read for 30 minutes
 /delete 3
+/journal Today I made time for reading.
+/journal
+/jread 1
+/jedit 1 Revised thoughts
+/jdelete 1
 /help
 ```
 
 Plain text is also added as a to-do. IDs remain stable when other tasks are deleted. `/list` includes current monthly goals; older goals remain stored but leave the current-month view. Daily completion and progress histories are retained locally. Deleting a habit also deletes that habit's per-item grid history; daily aggregate snapshots remain.
+
+Journal commands save and edit dated entries in the same local store as tasks. Sending `/journal` alone lists recent entry IDs; `/jread NUMBER` sends that entry back to your private bot chat. Entry text sent through Telegram is handled by Telegram as well as this app. Entries typed only on the Kindle stay local unless explicitly requested through the bot.
+
+The Mac helper’s `--mac-dialog` option uses a hidden native input box. Tokens are not passed as shell arguments or printed. On other systems, omit it to use the hidden terminal prompt.
 
 Only one device or app may poll the bot. Do not share the bot with another service. Telegram only retains incoming updates for up to 24 hours; this is not an unlimited offline queue. Offline Kindle edits remain local and durable. Live Telegram verification still requires the bot token and on-device Wi-Fi.
 

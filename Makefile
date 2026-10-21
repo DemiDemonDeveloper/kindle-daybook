@@ -1,6 +1,6 @@
 CC ?= cc
 CFLAGS ?= -O2 -std=c11 -Wall -Wextra -Werror
-COMMON = src/model.c vendor/cJSON.c
+COMMON = src/model.c src/store.c vendor/cJSON.c
 .PHONY: test host kindle clean
 host:
 	mkdir -p build
@@ -11,6 +11,9 @@ test:
 	./build/test-model
 	$(CC) $(CFLAGS) tests/test_ui.c $(COMMON) -lm -o build/test-ui
 	./build/test-ui
+	$(CC) $(CFLAGS) tests/test_journal.c $(COMMON) -lm -o build/test-journal
+	./build/test-journal
+	python3 tests/test_launcher.py
 kindle:
 	./scripts/build-kindle.sh
 clean:
