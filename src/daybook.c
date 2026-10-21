@@ -505,7 +505,7 @@ static void draw_detail(void) {
 }
 static void draw_menu(void) {
   header("SETTINGS");
-  text(24, 128, "Daybook 0.2.0 alpha", 2, 0);
+  text(24, 128, "Daybook 0.2.1 alpha", 2, 0);
   text(24, 170, "Dedicated task dashboard", 2, 0);
   text(24, 224,
        telegram_ready ? "Telegram configured" : "Telegram not configured", 2,

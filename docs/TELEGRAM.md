@@ -38,7 +38,7 @@ Journal commands save and edit dated entries in the same local store as tasks. S
 
 The Mac helper’s `--mac-dialog` option uses a hidden native input box. Tokens are not passed as shell arguments or printed. On other systems, omit it to use the hidden terminal prompt.
 
-Only one device or app may poll the bot. Do not share the bot with another service. Telegram only retains incoming updates for up to 24 hours; this is not an unlimited offline queue. Offline Kindle edits remain local and durable. Live Telegram verification still requires the bot token and on-device Wi-Fi.
+Only one device or app may poll the bot. Do not share the bot with another service. Telegram only retains incoming updates for up to 24 hours; this is not an unlimited offline queue. Offline Kindle edits remain local and durable.
 
 Telegram reference: https://core.telegram.org/bots/api#getupdates
 
