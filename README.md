@@ -13,6 +13,7 @@ Daybook is written in C and runs directly on a jailbroken Kindle. Once paired, i
 - **Monthly goals:** goals grouped by their creation month.
 - **Progress:** a 14-day completion graph and a seven-day habit grid.
 - **Journal:** dated entries with reading, editing, and deletion.
+- **Journal PIN:** encrypted past entries; adding a new entry stays available while locked.
 - **Telegram:** manage tasks and journals from a paired private bot chat.
 - **Screen cover:** custom wallpaper or rotating quotes, opened manually or after five minutes idle; tap to return.
 - **Local storage:** C records and strings held in memory and saved atomically to a checksummed file before screen refreshes.
@@ -20,6 +21,8 @@ Daybook is written in C and runs directly on a jailbroken Kindle. Once paired, i
 ![Sample progress graph and habit grid](docs/progress-preview.png)
 
 ![Sample journal screen](docs/journal-preview.png)
+
+![Journal PIN setup preview](docs/journal-lock-preview.png)
 
 ![Sample quote screen cover](docs/cover-preview.png)
 
@@ -30,6 +33,8 @@ These images are software previews using sample data. Photos of the real Kindle 
 **Alpha software, tested on Kindle Basic 7th generation (2014), WP63GW / KT2, firmware 5.12.2.2, with a 600×800 screen.** Other models and firmware versions have not been verified.
 
 On the physical Kindle, task controls and returning to Home work. Existing task data migrated to the new storage format with four tasks preserved. A journal message sent through Telegram received a reply and appeared in the running dashboard.
+
+The new journal PIN/encryption flow has desktop and sanitizer coverage; physical verification is pending.
 
 The quote cover and tap-to-return have also been verified on the physical Kindle. Custom wallpaper loading and the automatic idle timer have desktop test coverage; their physical-device verification is pending.
 
@@ -68,6 +73,7 @@ Task IDs appear in `/list`. Use `/help` for commands, or see the [command refere
 | [Installation details](docs/INSTALL.md) | Source installation, launcher behavior, recovery |
 | [Telegram setup](docs/TELEGRAM.md) | Bot creation, private pairing, sync behavior |
 | [Architecture](docs/ARCHITECTURE.md) | C application, storage, rendering, and transport |
+| [Journal privacy](docs/JOURNAL-LOCK.md) | PIN setup, encrypted entries, append while locked, and limitations |
 | [Wallpaper and quotes](docs/COVER.md) | Screen cover, custom images, quotes, and idle settings |
 | [Adding photos](docs/photos/README.md) | Where to put real-device pictures and how to show them here |
 
@@ -102,7 +108,7 @@ Tests cover task behavior, journal commands, touch controls, storage migration a
 - Telegram sync stops when Daybook is closed or offline. Incoming Telegram updates are retained for up to 24 hours.
 - WhatsApp, reminders, automatic startup, and arbitrary natural-language dates are not implemented.
 
-Tasks, journals, and bot settings are stored locally without encryption. Keep `daybook/data` and backups private. Tokens and runtime data are excluded from Git; never attach them to an issue or photograph them.
+Journal entries are encrypted after PIN setup. Tasks and bot settings remain unencrypted; older backups and Telegram chat history are separate copies. Keep `daybook/data` and backups private. Tokens and runtime data are excluded from Git; never attach them to an issue or photograph them.
 
 ## Development
 
@@ -110,4 +116,4 @@ Features will evolve through use on the device. Bug reports are most useful with
 
 ## License
 
-Original code is [MIT licensed](LICENSE). cJSON 1.7.19 is MIT licensed and the font8x8 basic font is public domain; their notices are retained in `vendor/`. FBInk is a separately installed dependency.
+Original code is [MIT licensed](LICENSE). cJSON 1.7.19 is MIT licensed and the font8x8 basic font is public domain; their notices are retained in `vendor/`. libsodium 1.0.22 is ISC licensed; its source archive and license are retained in `vendor/`. FBInk is a separately installed dependency.

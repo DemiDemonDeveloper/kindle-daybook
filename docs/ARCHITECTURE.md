@@ -2,6 +2,7 @@
 
 - `src/model.c`: tasks, stable IDs, daily habit dates, progress snapshots, command handling, one-time legacy JSON import.
 - `src/store.c`: validated binary records, length-prefixed strings, checksum, atomic persistence.
+- `src/vault.c`: PIN-wrapped private key, sealed journal entries, protected state loading and atomic saves.
 - `src/daybook.c`: 600×800 bitmap rendering, touch input, navigation, Telegram polling and owner checks.
 - `scripts/Daybook.sh`: Library entry point.
 - `scripts/run-dashboard.sh`: probe, pause the stock window manager, supervise dashboard, restore its framebuffer and resume it on exit. The framework is never stopped.
@@ -24,6 +25,6 @@ Daily routines store their last 90 completed dates. The model also stores the la
 4. Add opt-in dedicated startup, a USB bypass, and rollback controls.
 5. Consider a persistent dashboard on the sleep screen and richer habit statistics.
 
-Journal entries have separate stable IDs, original creation dates, and multiline bodies. Editing an entry retains its date. Kindle deletion requires confirmation. The local binary format and Telegram transport do not encrypt data at rest; protect device access and backups.
+Journal entries have separate stable IDs, original creation dates, and multiline bodies. Editing an entry retains its date. Kindle deletion requires confirmation. After PIN setup, `state.bin` uses a protected envelope containing public task records and individually sealed journal entries. See [Journal privacy](JOURNAL-LOCK.md) for the cryptographic format, access policy, and limits. Tasks and bot settings remain unencrypted.
 
 Replacing the bootloader/kernel or flashing another device's firmware is outside this first implementation.

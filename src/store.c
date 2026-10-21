@@ -187,7 +187,8 @@ int model_load(Model *m, const char *path, char *err, size_t n) {
              "Saved data checksum or records invalid; original preserved");
   return ok;
 }
-int model_save(const Model *m, const char *path, char *err, size_t n) {
+int model_pack(const Model *m, unsigned char **out, size_t *len, char *err,
+               size_t n) {
   Bytes b = {.ok = 1};
   number(&b, (uint32_t)m->next_id, 4);
   number(&b, (uint64_t)m->offset, 8);
@@ -230,29 +231,50 @@ int model_save(const Model *m, const char *path, char *err, size_t n) {
   put(&header, "DBKSTR01", 8);
   number(&header, b.n, 4);
   number(&header, checksum(b.p, b.n), 4);
-  char tmp[1024];
-  if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp)) {
-    free(b.p);
-    free(header.p);
-    return 0;
-  }
-  int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600), ok = fd >= 0;
-  for (int i = 0; i < 2 && ok; i++) {
-    Bytes *part = i ? &b : &header;
-    size_t off = 0;
-    while (off < part->n) {
-      ssize_t w = write(fd, part->p + off, part->n - off);
-      if (w < 0 && errno == EINTR)
-        continue;
-      if (w <= 0) {
-        ok = 0;
-        break;
-      }
-      off += (size_t)w;
-    }
+  *len = header.n + b.n;
+  *out = malloc(*len);
+  if (*out) {
+    memcpy(*out, header.p, header.n);
+    memcpy(*out + header.n, b.p, b.n);
   }
   free(b.p);
   free(header.p);
+  return *out != NULL;
+}
+int model_unpack(Model *m, unsigned char *data, size_t len, char *err,
+                 size_t n) {
+  int ok = len >= 16 && !memcmp(data, "DBKSTR01", 8);
+  if (ok) {
+    Bytes h = {.p = data, .n = len, .pos = 8, .ok = 1};
+    size_t bytes = (size_t)read_number(&h, 4);
+    uint32_t sum = (uint32_t)read_number(&h, 4);
+    ok = bytes == len - 16 && bytes <= STORE_LIMIT;
+    if (ok) {
+      Bytes b = {.p = data + 16, .n = bytes, .ok = 1};
+      ok = checksum(b.p, b.n) == sum && decode(m, &b);
+    }
+  }
+  if (!ok)
+    snprintf(err, n, "Saved records invalid");
+  return ok;
+}
+int store_write(const char *path, const unsigned char *data, size_t len,
+                char *err, size_t n) {
+  char tmp[1024];
+  if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp))
+    return 0;
+  int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600), ok = fd >= 0;
+  size_t off = 0;
+  while (ok && off < len) {
+    ssize_t w = write(fd, data + off, len - off);
+    if (w < 0 && errno == EINTR)
+      continue;
+    if (w <= 0) {
+      ok = 0;
+      break;
+    }
+    off += (size_t)w;
+  }
   if (fd >= 0) {
     if (ok && fsync(fd))
       ok = 0;
@@ -278,4 +300,14 @@ int model_save(const Model *m, const char *path, char *err, size_t n) {
     }
   }
   return 1;
+}
+
+int model_save(const Model *m, const char *path, char *err, size_t n) {
+  unsigned char *data = NULL;
+  size_t len = 0;
+  if (!model_pack(m, &data, &len, err, n))
+    return 0;
+  int ok = store_write(path, data, len, err, n);
+  free(data);
+  return ok;
 }

@@ -29,6 +29,7 @@ Commands:
 /jread 1
 /jedit 1 Revised thoughts
 /jdelete 1
+/jlock
 /help
 ```
 
@@ -45,3 +46,7 @@ Telegram reference: https://core.telegram.org/bots/api#getupdates
 ## Device verification
 
 On the target KT2, bot pairing and direct HTTPS sync succeeded. A new `/journal` message received a bot reply and appeared in Journal while Daybook was open. Telegram polling runs only while the dashboard is open.
+
+## Journal access
+
+After PIN setup, adding with `/journal TEXT` works while locked. Listing, reading, editing, and deleting earlier entries require unlocking Journal on the Kindle with its PIN. `/jlock` locks it again. Never send the PIN through Telegram. Existing chat history remains in Telegram; see [Journal privacy](JOURNAL-LOCK.md).

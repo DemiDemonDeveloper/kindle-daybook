@@ -8,7 +8,7 @@ This package runs a custom native interface. It does not flash firmware or chang
 2. Keep the Kindle on its normal screen and connect it by USB.
 3. On the Mac, run `python3 scripts/install.py --volume /Volumes/Kindle`.
 4. Safely eject the Kindle and unplug the cable.
-5. In Library → All items, open **Daybook** once.
+5. In Library → All items, open **Daybook** once. Choose and confirm a 6–12 digit journal PIN on the device; keep it safe because there is no recovery for a lost PIN. See [Journal privacy](JOURNAL-LOCK.md).
 6. Add a task, mark it complete, reopen it, and check the Progress tab. Open Journal in the header to write and read a dated entry.
 7. Use Menu → Exit dashboard before reconnecting USB. Verify that your task survives reopening the app.
 

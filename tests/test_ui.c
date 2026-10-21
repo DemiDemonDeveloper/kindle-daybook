@@ -77,6 +77,8 @@ int main(void) {
   network_updates(journal_update);
   assert(model.journal_count == 1);
   cJSON_Delete(journal_update);
+  assert(vault_enable(&journal_vault, &model, "731946", state_path, reply,
+                      sizeof(reply)));
   assert(apply("/jdelete 1"));
   touch(390, 30);
   assert(screen == 5);

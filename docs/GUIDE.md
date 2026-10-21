@@ -35,7 +35,7 @@ Copy these files to the Kindle drive, creating the folders if needed:
 
 Copy the individual application files when updating. Preserve the existing `daybook/data` folder; do not replace it with an empty one.
 
-Safely eject the drive, unplug the cable, and open **Daybook** in **Library → All items**. You should see Today, Daily, Goals, Progress, and a Journal button at the top.
+Safely eject the drive, unplug the cable, and open **Daybook** in **Library → All items**. The new version first asks you to choose and confirm a journal PIN. See [Journal privacy](JOURNAL-LOCK.md). After setup, the dashboard has Today, Daily, Goals, Progress, and a Journal button at the top.
 
 ### Install from source instead
 
@@ -59,7 +59,7 @@ The installer backs up an existing installation under the project's ignored `bui
 
 Use **+ Add** to create a task. Tap its checkbox to complete or reopen it. Tap **…** beside a task to rename or delete it; deletion on the Kindle requires confirmation. Use the page arrows for more items.
 
-Open **Journal** to write a dated entry. Its editor supports multiple lines. Journal entries have their own IDs, separate from task IDs. Editing an entry preserves its original date.
+Open **Journal** to write a dated entry. **+ Write entry** works while locked; reading, editing, and deleting previous entries require the journal PIN. Its editor supports multiple lines. Journal entries have their own IDs, separate from task IDs. Editing an entry preserves its original date.
 
 Changes are kept in memory and saved to local storage before screen refreshes. Rendering does not reload the task file on every update.
 
@@ -113,7 +113,10 @@ Replace example IDs with the IDs returned by the bot. Task IDs and journal IDs a
 | `/jread 1` | Read journal entry 1 in Telegram. |
 | `/jedit 1 Revised thoughts` | Replace entry 1's text, preserving its date. |
 | `/jdelete 1` | Delete journal entry 1 immediately. |
+| `/jlock` | Lock past journal entries on both interfaces. |
 | `/help` | Show command help. |
+
+Past-entry journal commands require a PIN-unlocked journal session on the Kindle. Never send the PIN through Telegram. New `/journal TEXT` entries remain available while locked.
 
 Telegram deletion commands do not show the Kindle's confirmation screen. Deleting a habit removes that habit's individual completion history; aggregate daily snapshots remain.
 
@@ -135,7 +138,7 @@ On first launch, Daybook imports an existing `state.json` if no `state.bin` exis
 
 To restore, close Daybook, connect USB, back up the current folder, and copy your saved `daybook/data` folder back. Safely eject and relaunch. Restore a coherent backup rather than mixing task files from different dates. Restoring an older update offset may allow retained Telegram commands to run again.
 
-The data and token are not encrypted. Keep backups private and do not upload runtime files to GitHub.
+Journal data is encrypted after PIN setup; tasks and the bot token remain unencrypted. Keep the PIN separately: lost PINs cannot be recovered. Older backups and Telegram history can still contain journal text. Keep backups private and do not upload runtime files to GitHub.
 
 ## 6. Troubleshooting
 

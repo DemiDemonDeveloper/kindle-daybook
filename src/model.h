@@ -32,6 +32,9 @@ typedef struct {
 void model_init(Model *m);
 int model_load(Model *m, const char *path, char *err, size_t n);
 int model_save(const Model *m, const char *path, char *err, size_t n);
+int model_pack(const Model *, unsigned char **, size_t *, char *, size_t);
+int model_unpack(Model *, unsigned char *, size_t, char *, size_t);
+int store_write(const char *, const unsigned char *, size_t, char *, size_t);
 int model_command(Model *m, const char *command, const char *day, char *reply,
                   size_t n);
 int task_done(const Task *t, const char *day);

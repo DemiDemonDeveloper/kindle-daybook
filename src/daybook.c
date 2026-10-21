@@ -1,15 +1,18 @@
 #define _POSIX_C_SOURCE 200809L
 #include "../vendor/font8x8_basic.h"
 #include "model.h"
+#include "vault.h"
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <sodium.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -23,6 +26,14 @@
 #define H 800
 #define ROWS 5
 static Model model;
+static Vault journal_vault;
+static char journal_pin[13], first_pin[13], pin_message[100];
+static int pin_phase, pin_failures;
+static time_t pin_not_before;
+static unsigned char sealed_draft[JOURNAL_MAX + crypto_box_SEALBYTES];
+static size_t sealed_draft_len;
+static int resume_draft_id;
+static void journal_lock(void);
 static unsigned char pixels[W * H];
 static char data_dir[700] = ".", state_path[1024], day[11], month_name[40],
             status_text[180] = "", draft[JOURNAL_MAX + 1] = "";
@@ -48,11 +59,15 @@ static time_t monotonic_seconds(void) {
   return t.tv_sec;
 }
 static void cover_open(void) {
+  journal_lock();
   covered = 1;
   cover_number++;
   dirty = 1;
 }
 static void idle_tick(time_t now) {
+  if (journal_vault.enabled && now - last_touch >= 120 &&
+      (journal_vault.unlocked || (screen == 1 && journal_mode)))
+    journal_lock();
   if (!covered && screen != 1 && idle_seconds > 0 &&
       now - last_touch >= idle_seconds)
     cover_open();
@@ -63,6 +78,7 @@ static int network_type, network_last_ok;
 static time_t next_poll;
 static char responses[10][REPLY_MAX];
 static int response_count, response_index;
+static int hardware_active;
 static void die_signal(int sig) {
   (void)sig;
   running = 0;
@@ -173,6 +189,77 @@ static void config_load(void) {
       id_ok = 0;
   telegram_ready = tok_ok && id_ok;
 }
+static int app_save(char *err, size_t n) {
+  int ok = vault_save(&journal_vault, &model, state_path, err, n);
+  if (ok && journal_vault.enabled && !journal_vault.unlocked)
+    vault_lock(&journal_vault, &model);
+  return ok;
+}
+static int journal_area(void) {
+  return screen == 5 || screen == 6 || screen == 7 ||
+         (screen == 1 && journal_mode);
+}
+static void journal_lock(void) {
+  if (!journal_vault.enabled)
+    return;
+  if (screen == 1 && journal_mode && draft[0]) {
+    size_t len = strlen(draft);
+    if (!crypto_box_seal(sealed_draft, (unsigned char *)draft, len,
+                         journal_vault.public_key)) {
+      sealed_draft_len = len + crypto_box_SEALBYTES;
+      resume_draft_id = edit_id;
+    }
+  }
+  int was_journal = journal_area();
+  vault_lock(&journal_vault, &model);
+  sodium_memzero(responses, sizeof(responses));
+  response_count = response_index = 0;
+  if (was_journal) {
+    sodium_memzero(draft, sizeof(draft));
+    sodium_memzero(status_text, sizeof(status_text));
+    screen = 8;
+    pin_phase = 0;
+    dirty = 1;
+  }
+  sodium_memzero(journal_pin, sizeof(journal_pin));
+  sodium_memzero(first_pin, sizeof(first_pin));
+  pin_message[0] = 0;
+}
+static int requires_journal_unlock(const char *command) {
+  while (isspace((unsigned char)*command))
+    command++;
+  size_t len = strcspn(command, " \t\r\n");
+  const char *arg = command + len;
+  while (isspace((unsigned char)*arg))
+    arg++;
+  return (len == 8 && !strncmp(command, "/journal", 8) && !*arg) ||
+         (len == 6 &&
+          (!strncmp(command, "/jread", 6) || !strncmp(command, "/jedit", 6))) ||
+         (len == 8 && !strncmp(command, "/jdelete", 8));
+}
+static int app_command(const char *command, char *reply, size_t n) {
+  if (journal_vault.unlocked && monotonic_seconds() - last_touch >= 120)
+    journal_lock();
+  if (!strcmp(command, "/jlock")) {
+    journal_lock();
+    snprintf(reply, n, "Journal locked. New entries can still be added.");
+    return 0;
+  }
+  if (!strncmp(command, "/junlock", 8)) {
+    snprintf(reply, n,
+             "Enter the journal PIN on the Kindle, never in Telegram.");
+    return 0;
+  }
+  if (requires_journal_unlock(command) &&
+      (!journal_vault.enabled || !journal_vault.unlocked)) {
+    snprintf(reply, n,
+             "Journal locked. Unlock it with your PIN on the Kindle to read or "
+             "change past entries. Adding is available with /journal Your "
+             "thoughts.");
+    return 0;
+  }
+  return model_command(&model, command, day, reply, n);
+}
 static void rect(int x, int y, int w, int h, int shade) {
   for (int yy = y; yy < y + h && yy < H; yy++)
     if (yy >= 0)
@@ -248,7 +335,8 @@ static void list_indices(void) {
 }
 static void header(const char *title) {
   text(24, 20, title, 3, 0);
-  button(328, 14, 130, 42, "Journal",
+  button(328, 14, 130, 42,
+         journal_vault.unlocked && journal_area() ? "Lock" : "Journal",
          screen == 5 || screen == 6 || screen == 7);
   button(470, 14, 106, 42, "Menu", 0);
   text(24, 62, day, 2, 0);
@@ -566,7 +654,7 @@ static void draw_detail(void) {
 }
 static void draw_menu(void) {
   header("SETTINGS");
-  text(24, 128, "Daybook 0.3.0 alpha", 2, 0);
+  text(24, 128, "Daybook 0.4.0 alpha", 2, 0);
   text(24, 170, "Dedicated task dashboard", 2, 0);
   text(24, 224,
        telegram_ready ? "Telegram configured" : "Telegram not configured", 2,
@@ -581,6 +669,36 @@ static void draw_menu(void) {
   button(24, 550, 552, 64, "Sync now", 0);
   button(24, 630, 552, 64, "Exit dashboard", 0);
   button(24, 710, 552, 64, "Back", 0);
+}
+static void draw_journal_pin(void) {
+  text(24, 26, pin_phase ? "PROTECT JOURNAL" : "JOURNAL LOCKED", 2, 0);
+  wrapped(24, 90,
+          pin_phase == 1
+              ? "Choose 6-12 digits. No PIN recovery. Keep it somewhere safe."
+          : pin_phase == 2 ? "Enter the same PIN again to confirm."
+                           : "Enter your PIN to read past entries.",
+          33, 3, 2);
+  char dots[13];
+  size_t len = strlen(journal_pin);
+  memset(dots, '*', len);
+  dots[len] = 0;
+  centered(24, 184, 552, dots, 3, 0);
+  wrapped(24, 228, pin_message, 33, 2, 2);
+  for (int i = 0; i < 9; i++) {
+    char key[2] = {(char)('1' + i), 0};
+    button(24 + (i % 3) * 184, 300 + (i / 3) * 82, 170, 64, key, 0);
+  }
+  button(24, 546, 170, 64, "Backspace", 0);
+  button(208, 546, 170, 64, "0", 0);
+  button(392, 546, 170, 64, "Clear", 0);
+  button(24, 628, 552, 64,
+         pin_phase == 1   ? "Next"
+         : pin_phase == 2 ? "Protect journal"
+                          : "Unlock",
+         1);
+  button(24, 710, 264, 62, journal_vault.enabled ? "+ Write entry" : "Cancel",
+         0);
+  button(312, 710, 264, 62, "Back", 0);
 }
 static int draw_wallpaper(void) {
   char file[1024];
@@ -646,11 +764,16 @@ static int write_frame(const char *file) {
 static void render(const char *snapshot) {
   if (!snapshot) {
     char err[180] = "Save failed";
-    if (!model_save(&model, state_path, err, sizeof(err)))
+    if (!app_save(err, sizeof(err)))
       snprintf(status_text, sizeof(status_text), "%s", err);
   }
 
   memset(pixels, 255, sizeof(pixels));
+  if ((screen == 5 || screen == 6 || screen == 7) &&
+      (!journal_vault.enabled || !journal_vault.unlocked)) {
+    screen = 8;
+    pin_phase = journal_vault.enabled ? 0 : 1;
+  }
   if (covered)
     draw_cover();
   else if (screen == 1)
@@ -659,6 +782,8 @@ static void render(const char *snapshot) {
     draw_detail();
   else if (screen == 3)
     draw_menu();
+  else if (screen == 8)
+    draw_journal_pin();
   else if (screen == 5)
     draw_journal_list();
   else if (screen == 6 || screen == 7)
@@ -669,12 +794,13 @@ static void render(const char *snapshot) {
   if (snapshot)
     snprintf(frame, sizeof(frame), "%s", snapshot);
   else
-    path(frame, sizeof(frame), "screen.pgm");
+    snprintf(frame, sizeof(frame), "/tmp/daybook-screen-%ld.pgm",
+             (long)getpid());
   if (!write_frame(frame)) {
     snprintf(status_text, sizeof(status_text), "Could not write screen");
     return;
   }
-  if (!snapshot) {
+  if (!snapshot && hardware_active) {
     pid_t p = fork();
     if (p == 0) {
       if (frame_count % 10 == 0)
@@ -689,8 +815,10 @@ static void render(const char *snapshot) {
       fprintf(stderr, "Display refresh failed\n");
       running = 0;
     }
+    unlink(frame);
     frame_count++;
-  }
+  } else if (!snapshot)
+    unlink(frame);
   dirty = 0;
 }
 static void history(const char *command) {
@@ -712,12 +840,16 @@ static void history(const char *command) {
 static int apply(const char *command) {
   Model before = model;
   char reply[REPLY_MAX], err[180] = "Save failed";
-  int changed = model_command(&model, command, day, reply, sizeof(reply));
-  if (changed && !model_save(&model, state_path, err, sizeof(err))) {
+  int changed = app_command(command, reply, sizeof(reply));
+  if (changed && !app_save(err, sizeof(err))) {
     model = before;
+    if (journal_vault.enabled && !journal_vault.unlocked)
+      vault_lock(&journal_vault, &model);
+    sodium_memzero(&before, sizeof(before));
     snprintf(status_text, sizeof(status_text), "%s", err);
     return 0;
   }
+  sodium_memzero(&before, sizeof(before));
   if (changed)
     history(command);
   snprintf(status_text, sizeof(status_text), "%.170s", reply);
@@ -738,6 +870,101 @@ static void edit_open(int id) {
   status_text[0] = 0;
   dirty = 1;
 }
+static void pin_touch(int x, int y) {
+  size_t len = strlen(journal_pin);
+  if (y >= 710) {
+    sodium_memzero(journal_pin, sizeof(journal_pin));
+    sodium_memzero(first_pin, sizeof(first_pin));
+    if (x < 288 && journal_vault.enabled)
+      journal_edit(0);
+    else
+      screen = 0;
+    return;
+  }
+  if (y >= 300 && y < 610) {
+    int col = (x - 24) / 184, row = (y - 300) / 82;
+    if (x < 24 || col > 2 || row > 3 || (y - 300) % 82 >= 64 ||
+        (x - 24) % 184 >= 170)
+      return;
+    if (row == 3 && col == 0) {
+      if (len)
+        journal_pin[len - 1] = 0;
+    } else if (row == 3 && col == 2)
+      sodium_memzero(journal_pin, sizeof(journal_pin));
+    else if (len < 12) {
+      journal_pin[len] = row == 3 ? '0' : (char)('1' + row * 3 + col);
+      journal_pin[len + 1] = 0;
+    }
+    return;
+  }
+  if (y < 628 || y >= 692)
+    return;
+  if (!vault_pin_valid(journal_pin)) {
+    snprintf(pin_message, sizeof(pin_message), "Use 6 to 12 digits.");
+    return;
+  }
+  if (monotonic_seconds() < pin_not_before) {
+    snprintf(pin_message, sizeof(pin_message),
+             "Too many attempts. Wait one minute.");
+    return;
+  }
+  if (pin_phase == 1) {
+    memcpy(first_pin, journal_pin, sizeof(first_pin));
+    sodium_memzero(journal_pin, sizeof(journal_pin));
+    pin_phase = 2;
+    pin_message[0] = 0;
+    return;
+  }
+  if (pin_phase == 2 && strcmp(first_pin, journal_pin)) {
+    sodium_memzero(first_pin, sizeof(first_pin));
+    sodium_memzero(journal_pin, sizeof(journal_pin));
+    pin_phase = 1;
+    snprintf(pin_message, sizeof(pin_message), "PINs differ. Choose again.");
+    return;
+  }
+  snprintf(pin_message, sizeof(pin_message), "Please wait...");
+  render(NULL);
+  char err[180] = "Could not open journal";
+  int ok = pin_phase == 2 ? vault_enable(&journal_vault, &model, journal_pin,
+                                         state_path, err, sizeof(err))
+                          : vault_unlock(&journal_vault, &model, journal_pin,
+                                         err, sizeof(err));
+  sodium_memzero(journal_pin, sizeof(journal_pin));
+  sodium_memzero(first_pin, sizeof(first_pin));
+  dirty = 1;
+  if (ok) {
+    char legacy[1024];
+    path(legacy, sizeof(legacy), "state.json");
+    if (unlink(legacy) && errno != ENOENT)
+      snprintf(status_text, sizeof(status_text),
+               "Remove old state.json backup for privacy");
+    pin_failures = 0;
+    pin_not_before = 0;
+    pin_phase = 0;
+    pin_message[0] = 0;
+    screen = 5;
+    if (sealed_draft_len) {
+      size_t bytes = sealed_draft_len - crypto_box_SEALBYTES;
+      if (crypto_box_seal_open((unsigned char *)draft, sealed_draft,
+                               sealed_draft_len, journal_vault.public_key,
+                               journal_vault.secret_key) == 0) {
+        draft[bytes] = 0;
+        edit_id = resume_draft_id;
+        journal_mode = 1;
+        screen = 1;
+      }
+      sodium_memzero(sealed_draft, sizeof(sealed_draft));
+      sealed_draft_len = 0;
+    }
+    last_touch = monotonic_seconds();
+  } else {
+    snprintf(pin_message, sizeof(pin_message), "%.95s", err);
+    if (++pin_failures >= 5) {
+      pin_not_before = monotonic_seconds() + 60;
+      pin_failures = 0;
+    }
+  }
+}
 static void touch(int x, int y) {
   last_touch = monotonic_seconds();
   if (covered) {
@@ -748,12 +975,21 @@ static void touch(int x, int y) {
   char cmd[JOURNAL_MAX + 64];
   dirty = 1;
   status_text[0] = 0;
+  if (screen == 8) {
+    pin_touch(x, y);
+    return;
+  }
   if (x >= 328 && x < 458 && y < 58) {
-    screen = 5;
+    if (journal_vault.unlocked && journal_area())
+      journal_lock();
+    else
+      screen = journal_vault.unlocked ? 5 : 8;
+    pin_phase = journal_vault.enabled ? 0 : 1;
     journal_page = 0;
     return;
   }
   if (x >= 470 && y < 90) {
+    journal_lock();
     screen = 3;
     return;
   }
@@ -885,9 +1121,14 @@ static void touch(int x, int y) {
       return;
     }
     if (y >= 704) {
-      if (x < 300)
-        screen = journal_mode ? (edit_id ? 6 : 5) : 0;
-      else {
+      if (x < 300) {
+        sodium_memzero(draft, sizeof(draft));
+        screen = journal_mode
+                     ? (journal_vault.enabled && !journal_vault.unlocked ? 8
+                        : edit_id                                        ? 6
+                                                                         : 5)
+                     : 0;
+      } else {
         if (journal_mode) {
           if (edit_id)
             snprintf(cmd, sizeof(cmd), "/jedit %d %s", edit_id, draft);
@@ -901,8 +1142,14 @@ static void touch(int x, int y) {
                    : kind == 2 ? "goal"
                                : "add",
                    draft);
-        if (apply(cmd))
-          screen = journal_mode ? 5 : 0;
+        if (apply(cmd)) {
+          screen =
+              journal_mode
+                  ? (journal_vault.enabled && !journal_vault.unlocked ? 8 : 5)
+                  : 0;
+          sodium_memzero(draft, sizeof(draft));
+          sodium_memzero(cmd, sizeof(cmd));
+        }
       }
     }
     return;
@@ -981,8 +1228,8 @@ static int json_write(const char *file, cJSON *j) {
 }
 static void network_start(int type) {
   char req[1024], res[1024];
-  path(req, sizeof(req), "telegram-request.json");
-  path(res, sizeof(res), "telegram-response.json");
+  snprintf(req, sizeof(req), "/tmp/daybook-request-%ld.json", (long)getpid());
+  snprintf(res, sizeof(res), "/tmp/daybook-response-%ld.json", (long)getpid());
   cJSON *j = cJSON_CreateObject();
   if (type == 1) {
     cJSON_AddNumberToObject(j, "offset", (double)model.offset);
@@ -1056,15 +1303,18 @@ static void network_updates(cJSON *result) {
     int authorized = cJSON_IsString(typ) &&
                      !strcmp(typ->valuestring, "private") &&
                      !strcmp(actual, chat_id) && cJSON_IsString(txt);
-    int changed = authorized ? model_command(&model, txt->valuestring, day,
-                                             reply, sizeof(reply))
-                             : 0;
+    int changed =
+        authorized ? app_command(txt->valuestring, reply, sizeof(reply)) : 0;
     char err[180] = "Save failed";
-    if (!model_save(&model, state_path, err, sizeof(err))) {
+    if (!app_save(err, sizeof(err))) {
       model = before;
+      if (journal_vault.enabled && !journal_vault.unlocked)
+        vault_lock(&journal_vault, &model);
+      sodium_memzero(&before, sizeof(before));
       snprintf(status_text, sizeof(status_text), "%s", err);
       break;
     }
+    sodium_memzero(&before, sizeof(before));
     if (changed) {
       history(txt->valuestring);
       dirty = 1;
@@ -1083,7 +1333,13 @@ static void network_tick(void) {
     if (r == 0)
       return;
     network_pid = 0;
+    char req[1024], res[1024];
+    snprintf(req, sizeof(req), "/tmp/daybook-request-%ld.json", (long)getpid());
+    snprintf(res, sizeof(res), "/tmp/daybook-response-%ld.json",
+             (long)getpid());
+    unlink(req);
     if (r < 0 || !WIFEXITED(s) || WEXITSTATUS(s) != 0) {
+      unlink(res);
       fprintf(stderr, "Telegram %s transport failed (exit %d)\n",
               network_type == 1 ? "receive" : "reply",
               r < 0 || !WIFEXITED(s) ? -1 : WEXITSTATUS(s));
@@ -1096,9 +1352,8 @@ static void network_tick(void) {
       next_poll = now + poll_seconds;
       return;
     }
-    char p[1024];
-    path(p, sizeof(p), "telegram-response.json");
-    char *data = read_file(p, 256000);
+    char *data = read_file(res, 256000);
+    unlink(res);
     cJSON *j = data ? cJSON_Parse(data) : NULL;
     free(data);
     int ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "ok"));
@@ -1175,6 +1430,11 @@ static int input_open(int *xmin, int *xmax, int *ymin, int *ymax) {
   return -1;
 }
 static int hardware_run(void) {
+  hardware_active = 1;
+  if (!journal_vault.enabled) {
+    screen = 8;
+    pin_phase = 1;
+  }
   int xmin, xmax, ymin, ymax;
   int fd = input_open(&xmin, &xmax, &ymin, &ymax);
   if (fd < 0) {
@@ -1251,14 +1511,16 @@ static int hardware_run(void) {
     if (strcmp(prior, day)) {
       snprintf(prior, sizeof(prior), "%s", day);
       model_record_progress(&model, day);
-      model_save(&model, state_path, status_text, sizeof(status_text));
+      app_save(status_text, sizeof(status_text));
       dirty = 1;
     }
-    network_tick();
     idle_tick(monotonic_seconds());
+    network_tick();
     if (dirty && running)
       render(NULL);
   }
+  journal_lock();
+  sodium_memzero(draft, sizeof(draft));
   if (network_pid) {
     kill(network_pid, SIGTERM);
     child_status(network_pid);
@@ -1304,6 +1566,9 @@ int main(int argc, char **argv) {
       return 2;
     }
   }
+  umask(0077);
+  struct rlimit core_limit = {0, 0};
+  setrlimit(RLIMIT_CORE, &core_limit);
   signal(SIGINT, die_signal);
   signal(SIGTERM, die_signal);
   signal(SIGPIPE, SIG_IGN);
@@ -1323,7 +1588,7 @@ int main(int argc, char **argv) {
     if (access(legacy, F_OK) == 0)
       snprintf(load_path, sizeof(load_path), "%s", legacy);
   }
-  if (!model_load(&model, load_path, err, sizeof(err))) {
+  if (!vault_load(&journal_vault, &model, load_path, err, sizeof(err))) {
     fprintf(stderr, "%s\n", err);
     return 1;
   }
@@ -1337,6 +1602,10 @@ int main(int argc, char **argv) {
   }
 #endif
   if (demo) {
+    if (journal_vault.enabled) {
+      fprintf(stderr, "Use a separate data folder for demo mode.\n");
+      return 1;
+    }
     model_init(&model);
     char reply[REPLY_MAX];
     model_command(&model, "/daily Read for 20 minutes", day, reply,
@@ -1369,9 +1638,16 @@ int main(int argc, char **argv) {
     puts("Daybook: native executable, touchscreen, and FBInk are available.");
     return 0;
   }
-  if (!model_save(&model, state_path, err, sizeof(err))) {
+  if (!app_save(err, sizeof(err))) {
     fprintf(stderr, "%s\n", err);
     return 1;
+  }
+  const char *old_caches[] = {"screen.pgm", "telegram-request.json",
+                              "telegram-response.json"};
+  for (size_t i = 0; i < 3; i++) {
+    char old[1024];
+    path(old, sizeof(old), old_caches[i]);
+    unlink(old);
   }
   if (sync)
     return sync_once();
