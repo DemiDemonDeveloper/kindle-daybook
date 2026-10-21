@@ -952,6 +952,9 @@ static void network_tick(void) {
       return;
     network_pid = 0;
     if (r < 0 || !WIFEXITED(s) || WEXITSTATUS(s) != 0) {
+      fprintf(stderr, "Telegram %s transport failed (exit %d)\n",
+              network_type == 1 ? "receive" : "reply",
+              r < 0 || !WIFEXITED(s) ? -1 : WEXITSTATUS(s));
       if (network_type == 2)
         response_index++;
       if (network_last_ok) {
@@ -987,6 +990,30 @@ static void network_tick(void) {
     else if (now >= next_poll)
       network_start(1);
   }
+}
+static int sync_once(void) {
+  if (!telegram_ready) {
+    fprintf(stderr, "Telegram settings missing or invalid\n");
+    return 1;
+  }
+  struct timespec pause = {0, 100000000};
+  for (int i = 0; i < 550; i++) {
+    network_tick();
+    if (next_poll && !network_pid && response_index >= response_count) {
+      printf("Telegram sync %s; local tasks: %d; journal entries: %d\n",
+             network_last_ok ? "succeeded" : "failed", model.count,
+             model.journal_count);
+      return network_last_ok ? 0 : 1;
+    }
+    nanosleep(&pause, NULL);
+  }
+  if (network_pid) {
+    kill(network_pid, SIGTERM);
+    child_status(network_pid);
+    network_pid = 0;
+  }
+  fprintf(stderr, "Telegram sync timed out\n");
+  return 1;
 }
 #ifdef __linux__
 static int input_open(int *xmin, int *xmax, int *ymin, int *ymax) {
@@ -1110,7 +1137,7 @@ static int hardware_run(void) {
 #endif
 int main(int argc, char **argv) {
   const char *snapshot = NULL, *command = NULL;
-  int demo = 0, probe = 0;
+  int demo = 0, probe = 0, sync = 0;
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--data") && i + 1 < argc)
       snprintf(data_dir, sizeof(data_dir), "%s", argv[++i]);
@@ -1131,6 +1158,8 @@ int main(int argc, char **argv) {
       screen = 5;
     else if (!strcmp(argv[i], "--demo"))
       demo = 1;
+    else if (!strcmp(argv[i], "--sync-once"))
+      sync = 1;
     else if (!strcmp(argv[i], "--probe"))
       probe = 1;
     else {
@@ -1207,9 +1236,13 @@ int main(int argc, char **argv) {
     fprintf(stderr, "%s\n", err);
     return 1;
   }
+  if (sync)
+    return sync_once();
   return hardware_run();
 #else
   (void)probe;
+  if (sync)
+    return sync_once();
   (void)network_tick;
   (void)touch;
   fprintf(stderr, "Use --snapshot for a desktop preview; interactive mode runs "
