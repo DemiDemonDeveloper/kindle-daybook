@@ -46,7 +46,7 @@ Cover mode is saved separately in `daybook/data/cover-mode.txt`. Include that fi
 
 ## Verification status
 
-Desktop checks cover the idle timer, protection of open editors, repeated-touch wake rejection, complete short button presses, long/repeated button rejection, gesture isolation, saved mode selection, custom quotes, and wallpaper validation. The physical KT2 reports KEY_POWER on its max77696-onkey input device; full button-only cover verification is pending. The earlier quote cover was verified. Custom wallpaper loading and the automatic idle timer still need physical-device verification. The dashboard, exit, and Telegram journal flow have also been verified on the target KT2.
+Desktop checks cover the idle timer, protection of open editors, repeated-touch wake rejection, complete short button presses, long/repeated button rejection, gesture isolation, saved mode selection, custom quotes, and wallpaper validation. The physical KT2 reports KEY_POWER on its max77696-onkey input device; a short Power press to lock, touch rejection while covered, and a second short Power press to unlock have been verified on the device. The earlier quote cover was verified. Custom wallpaper loading and the automatic idle timer still need physical-device verification. The dashboard, exit, and Telegram journal flow have also been verified on the target KT2.
 
 ## If the button does not unlock
 

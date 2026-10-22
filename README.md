@@ -36,7 +36,7 @@ On the physical Kindle, task controls and returning to Home work. Existing task 
 
 Journal PIN setup, writing a new entry while locked, and requiring the PIN for past entries have been verified on the physical Kindle. Encryption, restart recovery, and locked Telegram read denial have desktop and sanitizer coverage.
 
-The Power-button input has been identified on the physical KT2. Button-only cover unlocking has desktop test coverage and awaits a device test. The earlier quote cover was verified on the physical Kindle. Custom wallpaper loading and the automatic idle timer have desktop test coverage; their physical-device verification is pending.
+On the physical KT2, a short Power press locks the cover, touch stays blocked, and another short Power press unlocks it. The earlier quote cover was verified on the physical Kindle. Custom wallpaper loading and the automatic idle timer have desktop test coverage; their physical-device verification is pending.
 
 Daybook provides a custom dashboard on the existing Kindle Linux system. It does not replace the operating system or install automatic startup. Open it from the Library and use **Menu → Exit dashboard** to return Home.
 
