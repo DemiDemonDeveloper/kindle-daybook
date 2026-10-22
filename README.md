@@ -34,7 +34,7 @@ These images are software previews using sample data. Photos of the real Kindle 
 
 On the physical Kindle, task controls and returning to Home work. Existing task data migrated to the new storage format with four tasks preserved. A journal message sent through Telegram received a reply and appeared in the running dashboard.
 
-The new journal PIN/encryption flow has desktop and sanitizer coverage; physical verification is pending.
+Journal PIN setup, writing a new entry while locked, and requiring the PIN for past entries have been verified on the physical Kindle. Encryption, restart recovery, and locked Telegram read denial have desktop and sanitizer coverage.
 
 The quote cover and tap-to-return have also been verified on the physical Kindle. Custom wallpaper loading and the automatic idle timer have desktop test coverage; their physical-device verification is pending.
 

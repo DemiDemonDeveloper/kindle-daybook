@@ -42,4 +42,4 @@ Back up the protected `state.bin` file with the rest of `daybook/data`, and reta
 
 ## Verification
 
-Desktop tests cover encryption migration, wrong PINs, locked additions across restart, edits/deletion, save failures, corruption detection, touchscreen PIN setup, locked Telegram reads, and draft recovery. Address/undefined-behavior sanitizer checks pass. Physical KT2 verification is pending for this new feature.
+Desktop tests cover encryption migration, wrong PINs, locked additions across restart, edits/deletion, save failures, corruption detection, touchscreen PIN setup, locked Telegram reads, and draft recovery. Address/undefined-behavior sanitizer checks pass. On the physical KT2, PIN setup succeeded, new-entry writing remained available while locked, and past entries required the PIN. The locked Telegram read policy has desktop test coverage; a separate physical Telegram lock test has not yet been recorded.
