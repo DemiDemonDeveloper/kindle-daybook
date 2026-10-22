@@ -63,7 +63,7 @@ Open **Journal** to write a dated entry. **+ Write entry** works while locked; r
 
 Changes are kept in memory and saved to local storage before screen refreshes. Rendering does not reload the task file on every update.
 
-For a wallpaper or motivational quotes, see [Screen cover](COVER.md). The cover appears after five minutes idle, or use Menu → Lock screen now. Tap once to return; it keeps Telegram syncing.
+For a wallpaper or motivational quotes, see [Screen cover](COVER.md). The cover appears after five minutes idle, or use Menu → Lock screen now. Briefly press and release Power to lock or unlock it. Touches cannot dismiss the cover; Telegram keeps syncing. The journal PIN remains separate.
 
 To leave, choose **Menu → Exit dashboard**. Wait for Kindle Home before connecting USB.
 

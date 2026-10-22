@@ -46,6 +46,15 @@ static int journal_mode, journal_page, journal_selected, journal_body_page;
 static int covered, wallpaper_mode, idle_seconds = 300;
 static unsigned cover_number;
 static time_t last_touch;
+static long long power_down_ms = -1, power_last_release_ms = -10000;
+static long long touch_quiet_until_ms;
+static int power_repeated;
+static long long power_toggle_event_ms = -1;
+static long long monotonic_milliseconds(void) {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (long long)t.tv_sec * 1000 + t.tv_nsec / 1000000;
+}
 static char cover_quotes[32][161];
 static int cover_quote_count;
 static const char *default_quotes[] = {
@@ -63,6 +72,43 @@ static void cover_open(void) {
   covered = 1;
   cover_number++;
   dirty = 1;
+}
+/* Only a complete short button press can change the cover. No touchscreen
+ * or magnetic-cover event can dismiss it. Long presses remain with powerd. */
+static int power_button_event(int value, long long now_ms) {
+  if (value == 1) {
+    if (power_down_ms < 0) {
+      power_down_ms = now_ms;
+      power_repeated = 0;
+    }
+    return 0;
+  }
+  if (value == 2) {
+    power_repeated = 1;
+    return 0;
+  }
+  if (value != 0 || power_down_ms < 0)
+    return 0;
+  long long held = now_ms - power_down_ms;
+  power_down_ms = -1;
+  if (held < 30 || held > 1500 || power_repeated ||
+      now_ms - power_last_release_ms < 700)
+    return 0;
+  power_last_release_ms = now_ms;
+  power_toggle_event_ms = now_ms;
+  if (covered) {
+    covered = 0;
+    dirty = 1;
+  } else
+    cover_open();
+  long long current_ms = monotonic_milliseconds();
+  last_touch = (time_t)(current_ms / 1000);
+  touch_quiet_until_ms = current_ms + 400;
+  return 1;
+}
+static int touch_contact_should_discard(long long event_ms, long long now_ms) {
+  return covered || event_ms <= power_toggle_event_ms ||
+         now_ms < touch_quiet_until_ms;
 }
 static void idle_tick(time_t now) {
   if (journal_vault.enabled && now - last_touch >= 120 &&
@@ -654,13 +700,14 @@ static void draw_detail(void) {
 }
 static void draw_menu(void) {
   header("SETTINGS");
-  text(24, 128, "Daybook 0.4.0 alpha", 2, 0);
+  text(24, 128, "Daybook 0.5.0 alpha", 2, 0);
   text(24, 170, "Dedicated task dashboard", 2, 0);
   text(24, 224,
        telegram_ready ? "Telegram configured" : "Telegram not configured", 2,
        0);
-  wrapped(24, 262, "Screen cover keeps Telegram syncing. Tap to return.", 33, 3,
-          2);
+  wrapped(24, 262,
+          "Screen cover keeps Telegram syncing. Press Power to lock or unlock.",
+          33, 3, 2);
   button(24, 350, 552, 64, "Lock screen now", 0);
   button(24, 430, 552, 64,
          wallpaper_mode ? "Cover: wallpaper (tap to switch)"
@@ -749,7 +796,7 @@ static void draw_cover(void) {
     wrapped(40, 285, quote, 21, 9, 3);
   }
   rect(0, 720, W, 80, 255);
-  text(92, 748, "Tap to return to Daybook", 2, 0);
+  centered(0, 748, W, "Press Power to unlock", 2, 0);
 }
 static int write_frame(const char *file) {
   FILE *f = fopen(file, "wb");
@@ -966,12 +1013,9 @@ static void pin_touch(int x, int y) {
   }
 }
 static void touch(int x, int y) {
-  last_touch = monotonic_seconds();
-  if (covered) {
-    covered = 0;
-    dirty = 1;
+  if (covered || monotonic_milliseconds() < touch_quiet_until_ms)
     return;
-  }
+  last_touch = monotonic_seconds();
   char cmd[JOURNAL_MAX + 64];
   dirty = 1;
   status_text[0] = 0;
@@ -1429,6 +1473,24 @@ static int input_open(int *xmin, int *xmax, int *ymin, int *ymax) {
   }
   return -1;
 }
+static int power_input_open(void) {
+  for (int i = 0; i < 16; i++) {
+    char path[80];
+    snprintf(path, sizeof(path), "/dev/input/event%d", i);
+    int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0)
+      continue;
+    unsigned char keys[(KEY_MAX + 8) / 8] = {0};
+    if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keys)), keys) >= 0 &&
+        (keys[KEY_POWER / 8] & (1u << (KEY_POWER % 8)))) {
+      fprintf(stderr, "Power button input: %s\n", path);
+      return fd;
+    }
+    close(fd);
+  }
+  fprintf(stderr, "No physical Power-button input found; launch cancelled\n");
+  return -1;
+}
 static int hardware_run(void) {
   hardware_active = 1;
   if (!journal_vault.enabled) {
@@ -1441,26 +1503,57 @@ static int hardware_run(void) {
     fprintf(stderr, "No touchscreen found\n");
     return 1;
   }
+  int power_fd = power_input_open();
+  if (power_fd < 0) {
+    close(fd);
+    return 1;
+  }
   if (ioctl(fd, EVIOCGRAB, 1)) {
     perror("Touchscreen grab");
+    close(power_fd);
     close(fd);
     return 1;
   }
   int rawx = xmin, rawy = ymin, slot = 0, pressed = 0, release = 0, seenx = 0,
       seeny = 0;
+  int discard_contact = 0;
   char prior[11];
   snprintf(prior, sizeof(prior), "%s", day);
   render(NULL);
   while (running) {
-    struct pollfd p = {fd, POLLIN, 0};
-    int ready = poll(&p, 1, 200);
+    struct pollfd p[2] = {{fd, POLLIN, 0}, {power_fd, POLLIN, 0}};
+    int ready = poll(p, 2, 200);
     if (ready < 0 && errno != EINTR)
       break;
-    if (ready > 0 && (p.revents & (POLLERR | POLLHUP | POLLNVAL)))
+    if (ready > 0 &&
+        ((p[0].revents | p[1].revents) & (POLLERR | POLLHUP | POLLNVAL))) {
+      fprintf(stderr, "Input device disconnected; returning Home\n");
       break;
-    if (ready > 0 && (p.revents & POLLIN)) {
+    }
+    /* Process the physical button before any queued touchscreen events. */
+    if (ready > 0 && (p[1].revents & POLLIN)) {
+      struct input_event e;
+      while (read(power_fd, &e, sizeof(e)) == (ssize_t)sizeof(e)) {
+        if (e.type == EV_KEY && e.code == KEY_POWER &&
+            power_button_event(e.value, (long long)e.input_event_sec * 1000 +
+                                            e.input_event_usec / 1000)) {
+          discard_contact = discard_contact || pressed;
+          pressed = release = seenx = seeny = 0;
+        }
+      }
+    }
+    if (ready > 0 && (p[0].revents & POLLIN)) {
       struct input_event e;
       while (read(fd, &e, sizeof(e)) == (ssize_t)sizeof(e)) {
+        if ((e.type == EV_KEY && e.code == BTN_TOUCH && e.value == 1) ||
+            (e.type == EV_ABS && e.code == ABS_MT_TRACKING_ID &&
+             e.value >= 0) ||
+            (e.type == EV_ABS && e.code == ABS_PRESSURE && e.value > 0)) {
+          if (touch_contact_should_discard((long long)e.input_event_sec * 1000 +
+                                               e.input_event_usec / 1000,
+                                           monotonic_milliseconds()))
+            discard_contact = 1;
+        }
         if (e.type == EV_ABS && e.code == ABS_MT_SLOT)
           slot = e.value;
         if (e.type == EV_ABS && slot == 0) {
@@ -1495,15 +1588,17 @@ static int hardware_run(void) {
         }
         if (e.type == EV_SYN && e.code == SYN_DROPPED) {
           pressed = release = seenx = seeny = 0;
+          discard_contact = 1;
         }
         if (e.type == EV_SYN && e.code == SYN_REPORT && release) {
-          if (pressed && seenx && seeny) {
+          if (!discard_contact && pressed && seenx && seeny) {
             int x = (int)((long long)(rawx - xmin) * (W - 1) / (xmax - xmin)),
                 y = (int)((long long)(rawy - ymin) * (H - 1) / (ymax - ymin));
             if (x >= 0 && x < W && y >= 0 && y < H)
               touch(x, y);
           }
-          pressed = release = 0;
+          pressed = release = seenx = seeny = 0;
+          discard_contact = 0;
         }
       }
     }
@@ -1526,6 +1621,7 @@ static int hardware_run(void) {
     child_status(network_pid);
   }
   ioctl(fd, EVIOCGRAB, 0);
+  close(power_fd);
   close(fd);
   return 0;
 }
@@ -1633,6 +1729,10 @@ int main(int argc, char **argv) {
     if (fd < 0)
       return 1;
     close(fd);
+    int button_fd = power_input_open();
+    if (button_fd < 0)
+      return 1;
+    close(button_fd);
     if (access("/var/local/kmc/bin/fbink", X_OK))
       return 1;
     puts("Daybook: native executable, touchscreen, and FBInk are available.");
@@ -1655,6 +1755,8 @@ int main(int argc, char **argv) {
 #else
   (void)probe;
   (void)idle_tick;
+  (void)power_button_event;
+  (void)touch_contact_should_discard;
   if (sync)
     return sync_once();
   (void)network_tick;

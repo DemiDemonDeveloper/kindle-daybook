@@ -23,8 +23,23 @@ int main(void) {
   char reply[REPLY_MAX];
   assert(model_command(&model, "/add Keep this task", "2026-10-21", reply,
                        sizeof(reply)));
-  touch(200, 530);
+  time_t saved_touch = last_touch;
+  dirty = 0;
+  for (int i = 0; i < 100; i++)
+    touch(200, 530);
+  assert(covered && screen == 4 && model.count == 1 && !dirty &&
+         last_touch == saved_touch);
+  assert(!power_button_event(0, 900));
+  assert(!power_button_event(1, 1000));
+  assert(power_button_event(0, 1100));
   assert(!covered && screen == 4 && model.count == 1);
+  assert(touch_contact_should_discard(1050, monotonic_milliseconds()));
+  assert(touch_contact_should_discard(1200, monotonic_milliseconds()));
+  touch_quiet_until_ms = 0;
+  assert(touch_contact_should_discard(1050, monotonic_milliseconds()));
+  assert(!touch_contact_should_discard(1200, monotonic_milliseconds()));
+  assert(!power_button_event(0, 1200));
+  assert(!covered);
   screen = 1;
   last_touch = 100;
   idle_tick(1000);
@@ -37,7 +52,21 @@ int main(void) {
   touch(200, 380);
   assert(covered);
   touch(200, 380);
+  assert(covered && screen == 3);
+  assert(!power_button_event(1, 3000));
+  assert(!power_button_event(2, 3500));
+  assert(!power_button_event(0, 3600));
+  assert(covered);
+  assert(!power_button_event(1, 5000));
+  assert(!power_button_event(0, 7000));
+  assert(covered);
+  assert(!power_button_event(1, 9000));
+  assert(power_button_event(0, 9100));
   assert(!covered && screen == 3);
+  assert(!power_button_event(1, 9200));
+  assert(!power_button_event(0, 9300));
+  assert(!covered);
+  touch_quiet_until_ms = 0;
   touch(200, 460);
   assert(wallpaper_mode);
   wallpaper_mode = 0;
@@ -67,7 +96,8 @@ int main(void) {
   wallpaper_mode = 0;
   draw_cover();
   assert(cover_quote_count == 2);
-  puts("PASS: idle cover, editor protection, wake touch isolation, mode "
+  puts("PASS: idle cover, editor protection, touch-only wake rejection and "
+       "short Power-button toggling, mode "
        "persistence, wallpaper validation, and custom quotes.");
   return 0;
 }

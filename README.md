@@ -15,7 +15,7 @@ Daybook is written in C and runs directly on a jailbroken Kindle. Once paired, i
 - **Journal:** dated entries with reading, editing, and deletion.
 - **Journal PIN:** encrypted past entries; adding a new entry stays available while locked.
 - **Telegram:** manage tasks and journals from a paired private bot chat.
-- **Screen cover:** custom wallpaper or rotating quotes, opened manually or after five minutes idle; tap to return.
+- **Screen cover:** custom wallpaper or rotating quotes, opened manually or after five minutes idle; only a short Power-button press unlocks it.
 - **Local storage:** C records and strings held in memory and saved atomically to a checksummed file before screen refreshes.
 
 ![Sample progress graph and habit grid](docs/progress-preview.png)
@@ -36,7 +36,7 @@ On the physical Kindle, task controls and returning to Home work. Existing task 
 
 Journal PIN setup, writing a new entry while locked, and requiring the PIN for past entries have been verified on the physical Kindle. Encryption, restart recovery, and locked Telegram read denial have desktop and sanitizer coverage.
 
-The quote cover and tap-to-return have also been verified on the physical Kindle. Custom wallpaper loading and the automatic idle timer have desktop test coverage; their physical-device verification is pending.
+The Power-button input has been identified on the physical KT2. Button-only cover unlocking has desktop test coverage and awaits a device test. The earlier quote cover was verified on the physical Kindle. Custom wallpaper loading and the automatic idle timer have desktop test coverage; their physical-device verification is pending.
 
 Daybook provides a custom dashboard on the existing Kindle Linux system. It does not replace the operating system or install automatic startup. Open it from the Library and use **Menu → Exit dashboard** to return Home.
 

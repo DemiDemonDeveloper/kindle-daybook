@@ -69,6 +69,16 @@ int main(void) {
   assert(response_count == 1 && strstr(responses[0], "locked") &&
          !strstr(responses[0], "Original private memory"));
   assert(model.offset == 2 && !journal_vault.unlocked);
+  enter_pin("73194682");
+  assert(journal_vault.unlocked);
+  assert(!power_button_event(1, 1000));
+  assert(power_button_event(0, 1100));
+  assert(covered && !journal_vault.unlocked && !model.journal[0].body[0]);
+  touch(390, 30);
+  assert(covered);
+  assert(!power_button_event(1, 3000));
+  assert(power_button_event(0, 3100));
+  assert(!covered && !journal_vault.unlocked && screen == 8);
   puts("PASS: PIN setup/unlock, locked read/edit/delete denial, locked append, "
        "encrypted draft recovery, and Telegram read authorization.");
   return 0;
