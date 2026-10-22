@@ -69,6 +69,7 @@ Task IDs appear in `/list`. Use `/help` for commands, or see the [command refere
 
 | Guide | Contents |
 | --- | --- |
+| [How the project was created](docs/PROJECT-TOUR.md) | Beginner-friendly tour of the app, hardware, storage, Telegram, and encryption |
 | [Setup and user guide](docs/GUIDE.md) | Installation, everyday use, commands, backups, troubleshooting |
 | [Installation details](docs/INSTALL.md) | Source installation, launcher behavior, recovery |
 | [Telegram setup](docs/TELEGRAM.md) | Bot creation, private pairing, sync behavior |
